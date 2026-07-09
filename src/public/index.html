@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Local Issues</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header class="header">
+    <div>
+      <h1>Local Issues</h1>
+      <p class="subtitle">Small local issue tracker with outbound webhooks</p>
+    </div>
+    <div class="header-actions">
+      <button id="settings-btn" class="btn btn-ghost" type="button">Settings</button>
+      <button id="new-issue-btn" class="btn btn-primary" type="button">New issue</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel issues-panel">
+      <div class="panel-header issues-panel-header">
+        <h2>Issues</h2>
+        <div class="filters">
+          <button class="filter-btn active" data-status="">All</button>
+          <button class="filter-btn" data-status="open">Open</button>
+          <button class="filter-btn" data-status="in_progress">In progress</button>
+          <button class="filter-btn" data-status="closed">Closed</button>
+        </div>
+        <div class="list-toolbar">
+          <input
+            id="label-filter"
+            class="input label-filter-input"
+            type="text"
+            placeholder="Filter by label"
+          />
+        </div>
+      </div>
+      <ul id="issue-list" class="issue-list"></ul>
+      <div class="pager">
+        <button id="prev-page-btn" class="btn btn-ghost btn-sm" type="button" disabled>Prev</button>
+        <span id="page-info" class="page-info">—</span>
+        <button id="next-page-btn" class="btn btn-ghost btn-sm" type="button" disabled>Next</button>
+      </div>
+    </section>
+
+    <section class="panel detail-panel">
+      <div id="empty-state" class="empty-state">
+        <p>Select an issue or create a new one.</p>
+      </div>
+      <div id="issue-detail" class="issue-detail hidden">
+        <div class="detail-header">
+          <span id="issue-number" class="issue-number"></span>
+          <div class="detail-actions">
+            <button id="trigger-btn" class="btn btn-secondary" type="button">Send webhook</button>
+            <button id="toggle-status-btn" class="btn btn-ghost" type="button"></button>
+            <button id="delete-btn" class="btn btn-danger" type="button">Delete</button>
+          </div>
+        </div>
+        <input id="detail-title" class="input title-input" type="text" />
+        <textarea id="detail-body" class="input body-input" rows="12"></textarea>
+        <div class="labels-row">
+          <label for="detail-labels">Labels</label>
+          <div class="labels-row-fields">
+            <input id="detail-labels" class="input" type="text" placeholder="trigger, bug, docs" />
+            <button id="save-btn" class="btn btn-primary" type="button">Save</button>
+          </div>
+        </div>
+        <p id="detail-meta" class="meta"></p>
+        <section class="comments-section">
+          <h3>Comments</h3>
+          <ul id="comment-list" class="comment-list"></ul>
+          <form id="comment-form" class="comment-form">
+            <textarea
+              id="comment-body"
+              name="body"
+              class="input comment-input"
+              rows="3"
+              placeholder="Write a comment…"
+              required
+            ></textarea>
+            <div class="comment-form-actions">
+              <button class="btn btn-primary" type="submit">Add comment</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </section>
+
+    <section class="panel deliveries-panel">
+      <div class="panel-header">
+        <h2>Webhook deliveries</h2>
+        <div class="panel-header-actions">
+          <button id="clear-deliveries-btn" class="btn btn-ghost" type="button">Clear</button>
+          <button id="refresh-deliveries-btn" class="btn btn-ghost" type="button">Refresh</button>
+        </div>
+      </div>
+      <ul id="delivery-list" class="delivery-list"></ul>
+    </section>
+  </main>
+
+  <dialog id="new-issue-dialog" class="dialog">
+    <form id="new-issue-form" method="dialog">
+      <h2>New issue</h2>
+      <label>
+        Title
+        <input name="title" class="input" required />
+      </label>
+      <label>
+        Body
+        <textarea name="body" class="input" rows="8"></textarea>
+      </label>
+      <label>
+        Labels
+        <input name="labels" class="input" placeholder="trigger, bug" />
+      </label>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" value="cancel" type="submit">Cancel</button>
+        <button class="btn btn-primary" value="create" type="submit">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settings-dialog" class="dialog">
+    <form id="settings-form" method="dialog">
+      <h2>Settings</h2>
+      <label>
+        Webhook URL
+        <input name="webhookUrl" class="input" />
+      </label>
+      <label>
+        Label filter
+        <input name="labelFilter" class="input" />
+      </label>
+      <label class="checkbox-row">
+        <input name="webhookEnabled" type="checkbox" />
+        Enable webhooks
+      </label>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" value="cancel" type="submit">Cancel</button>
+        <button class="btn btn-primary" value="save" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

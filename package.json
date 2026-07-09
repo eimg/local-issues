@@ -1,0 +1,32 @@
+{
+  "name": "local-issues",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Small local issue tracker with outbound webhooks",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "local-issues": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc && cp -r src/public dist/",
+    "dev": "tsx src/cli.ts serve",
+    "start": "node dist/cli.js",
+    "test": "node --test --import tsx test/*.test.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^20",
+    "@types/supertest": "^7.2.0",
+    "supertest": "^7.2.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
