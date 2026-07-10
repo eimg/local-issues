@@ -58,7 +58,7 @@ cd helix && npm install && npm run build && npm link
 
 cd your-project
 helix init --preset typescript
-# configure ~/.helix/secrets.json and .helix/config.json (see Helix README)
+cp .env.example .env   # set OPENROUTER_API_KEY + HELIX_MODEL
 helix serve
 # → http://127.0.0.1:8319/
 ```
