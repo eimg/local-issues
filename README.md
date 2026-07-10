@@ -1,17 +1,88 @@
 # Local Issues
 
-A small, self-contained issue tracker for local development. Issues are stored in SQLite; outbound webhooks POST JSON to any URL you configure.
+A small, self-contained issue tracker for local development. Issues live in SQLite; outbound webhooks POST JSON to any URL you configure.
 
-## Quick start
+Pairs naturally with [Helix](https://github.com/eimg/helix) for local agent-driven workflows — no GitHub account required.
+
+## Companion project: [Helix](https://github.com/eimg/helix)
+
+This tracker is built to pair with **[Helix](https://github.com/eimg/helix)** — an agent orchestration system that runs specialist coding agents (planner, dev, verifier, …) against your repo.
+
+| Project | Role |
+|---------|------|
+| **local-issues** (this repo) | Create and track issues locally; fire webhooks when labeled issues appear |
+| **[Helix](https://github.com/eimg/helix)** | Receives `POST /runs`, orchestrates agents, optionally callbacks on completion |
+
+```
+local-issues (issue + label) ──POST──► Helix /runs ──► specialist agents
+       ▲                                        │
+       └──────── run.completed callback ────────┘
+```
+
+No GitHub account or `gh` CLI required for this loop.
+
+## Requirements
+
+- Node.js ≥ 20
+
+## Install
 
 ```bash
-cd ~/Desktop/local-issues
+git clone https://github.com/eimg/local-issues.git
+cd local-issues
 npm install
+npm run build    # optional; dev mode compiles on the fly
+npm link         # optional; exposes `local-issues` CLI
+```
+
+## Getting started
+
+### Standalone (tracker only)
+
+```bash
 npm run dev
 # → http://127.0.0.1:8320/
 ```
 
 Open **Settings** to set your webhook URL and label filter, then create issues from the UI or API.
+
+### Recommended: Helix integration
+
+Run both services side by side.
+
+**Terminal 1 — Helix on your target repo**
+
+```bash
+git clone https://github.com/eimg/helix.git
+cd helix && npm install && npm run build && npm link
+
+cd your-project
+helix init --preset typescript
+# configure ~/.helix/secrets.json and .helix/config.json (see Helix README)
+helix serve
+# → http://127.0.0.1:8319/
+```
+
+**Terminal 2 — local-issues**
+
+```bash
+git clone https://github.com/eimg/local-issues.git
+cd local-issues && npm install
+npm run dev
+# → http://127.0.0.1:8320/
+```
+
+**Configure Settings** (`http://127.0.0.1:8320/`):
+
+| Setting | Value |
+|---------|-------|
+| Webhook URL | `http://127.0.0.1:8319/runs` |
+| Label filter | `trigger` (default) |
+| Webhooks enabled | on |
+
+Create an open issue with the `trigger` label (or add the label to an existing issue). local-issues delivers a webhook; Helix starts a run. Watch progress in the Helix run console. On completion, Helix POSTs back and this tracker marks the issue **closed** with a Helix comment.
+
+Full Helix setup and config: [github.com/eimg/helix](https://github.com/eimg/helix#getting-started).
 
 ## Default configuration
 
@@ -32,17 +103,59 @@ When webhooks are enabled and a URL is set, delivery fires on:
 3. **Issue reopened** — open issue still has the filter label
 4. **Manual** — **Send webhook** button or `POST /api/issues/:id/trigger`
 
-Payload:
+Outbound payload (includes correlation for Helix callbacks):
 
 ```json
 {
   "title": "Fix login",
   "body": "Empty password returns 500",
-  "labels": ["trigger", "bug"]
+  "labels": ["trigger", "bug"],
+  "external": {
+    "trackerUrl": "http://127.0.0.1:8320",
+    "issueId": 7
+  }
 }
 ```
 
+Headers: `X-Issues-Issue-Id`, `X-Issues-Source`, `X-Issues-Reason`.
+
 Failed deliveries retry up to 3 times. All attempts appear in the **Webhook deliveries** panel.
+
+## Helix callbacks (inbound)
+
+Helix can notify this tracker as a run progresses. Endpoint: `POST /api/webhooks/helix`
+
+**`run.completed`** (sent by Helix today when a run finishes):
+
+```
+POST /api/webhooks/helix
+X-Helix-Event: run.completed
+
+{
+  "event": "run.completed",
+  "run": { "id": "...", "status": "done", "startedAt": ..., "finishedAt": ... },
+  "issue": { "id": 7, "title": "Fix login" }
+}
+```
+
+→ issue status `closed` + Helix comment
+
+**`run.started`** (supported by this tracker; Helix does not send it yet):
+
+```
+POST /api/webhooks/helix
+X-Helix-Event: run.started
+
+{
+  "event": "run.started",
+  "run": { "id": "...", "status": "running", "startedAt": ... },
+  "issue": { "id": 7, "title": "Fix login" }
+}
+```
+
+→ issue status `in_progress` + Helix comment
+
+Callbacks use no auth — intended for local development.
 
 ## API
 
@@ -76,51 +189,6 @@ npm test
 npm run build
 ```
 
-## Webhook integration
+## License
 
-Point the webhook URL at any HTTP endpoint that accepts `POST` with a JSON body. The receiver defines what the payload means — this tracker only stores issues and delivers events.
-
-### Progress callbacks (Helix → Local Issues)
-
-Helix can notify this tracker as a run progresses:
-
-```
-POST /api/webhooks/helix
-X-Helix-Event: run.started
-
-{
-  "event": "run.started",
-  "run": { "id": "...", "status": "running", "startedAt": ... },
-  "issue": { "id": 7, "title": "Fix login" }
-}
-```
-
-```
-POST /api/webhooks/helix
-X-Helix-Event: run.completed
-
-{
-  "event": "run.completed",
-  "run": { "id": "...", "status": "done", "startedAt": ..., "finishedAt": ... },
-  "issue": { "id": 7, "title": "Fix login" }
-}
-```
-
-- `run.started` → status `in_progress` + Helix comment
-- `run.completed` → status `closed` + Helix comment
-
-Outbound webhooks include correlation for this round-trip:
-
-```json
-{
-  "title": "...",
-  "body": "...",
-  "labels": ["trigger"],
-  "external": {
-    "trackerUrl": "http://127.0.0.1:8320",
-    "issueId": 7
-  }
-}
-```
-
-Headers: `X-Issues-Issue-Id`, `X-Issues-Source` (same correlation, header-style).
+[MIT](./LICENSE)

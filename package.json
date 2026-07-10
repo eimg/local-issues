@@ -1,9 +1,27 @@
 {
   "name": "local-issues",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
-  "description": "Small local issue tracker with outbound webhooks",
+  "description": "Experimental local issue tracker — companion to Helix, with outbound webhooks",
+  "license": "MIT",
+  "author": "Ei Maung",
+  "keywords": [
+    "issues",
+    "tracker",
+    "webhooks",
+    "helix",
+    "local",
+    "experimental"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eimg/local-issues.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eimg/local-issues/issues"
+  },
+  "homepage": "https://github.com/eimg/local-issues#readme",
   "engines": {
     "node": ">=20"
   },
