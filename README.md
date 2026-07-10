@@ -4,6 +4,8 @@ A small, self-contained issue tracker for local development. Issues live in SQLi
 
 Pairs naturally with [Helix](https://github.com/eimg/helix) for local agent-driven workflows — no GitHub account required.
 
+![Local Issues](https://i.imgur.com/icyJMPP.jpeg)
+
 ## Companion project: [Helix](https://github.com/eimg/helix)
 
 This tracker is built to pair with **[Helix](https://github.com/eimg/helix)** — an agent orchestration system that runs specialist coding agents (planner, dev, verifier, …) against your repo.
