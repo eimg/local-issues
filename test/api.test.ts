@@ -19,8 +19,9 @@ describe("local-issues API", () => {
     dataDir = mkdtempSync(join(tmpdir(), "local-issues-"));
     db = openDatabase(dataDir);
     saveConfig(db, {
-      webhookUrl: "http://example.test/hook",
+      webhookUrl: "http://helix.test/runs",
       labelFilter: "trigger",
+      commentTrigger: "/helix",
       webhookEnabled: true,
       baseUrl: "http://127.0.0.1:8320",
     });
@@ -252,6 +253,91 @@ describe("local-issues API", () => {
 
     const got = await request(app).get(`/api/issues/${issueId}`).expect(200);
     assert.equal(got.body.status, "closed");
+  });
+
+  it("sends /helix comments as linked continuations and reopens the issue", async () => {
+    const created = await request(app)
+      .post("/api/issues")
+      .send({ title: "Continue me", body: "Original work", labels: ["trigger"] })
+      .expect(201);
+    const issueId = created.body.issue.id as number;
+
+    await request(app)
+      .post("/api/webhooks/helix")
+      .set("X-Helix-Event", "run.completed")
+      .send({
+        event: "run.completed",
+        run: { id: "root-run", status: "done", startedAt: 100, finishedAt: 200 },
+        issue: { id: issueId, title: "Continue me" },
+      })
+      .expect(200);
+
+    webhookCalls.length = 0;
+    const comment = await request(app)
+      .post(`/api/issues/${issueId}/comments`)
+      .send({ body: "/helix also cover the regression case", author: "alice" })
+      .expect(201);
+
+    assert.equal(comment.body.issue.status, "open");
+    assert.equal(comment.body.delivery.success, true);
+    assert.equal(webhookCalls.length, 1);
+    assert.equal(webhookCalls[0].url, "http://helix.test/runs/root-run/continuations");
+    assert.deepEqual(webhookCalls[0].body, {
+      instruction: "also cover the regression case",
+      externalEventId: `comment:${comment.body.id}`,
+      trigger: "issue.comment",
+    });
+  });
+
+  it("reopen targets the latest completed Helix run", async () => {
+    const created = await request(app)
+      .post("/api/issues")
+      .send({ title: "Reopen me", labels: ["trigger"] })
+      .expect(201);
+    const issueId = created.body.issue.id as number;
+
+    await request(app).post("/api/webhooks/helix").set("X-Helix-Event", "run.completed").send({
+      event: "run.completed",
+      run: {
+        id: "continuation-two",
+        parentRunId: "root-one",
+        rootRunId: "root-one",
+        status: "done",
+        startedAt: 300,
+        finishedAt: 400,
+      },
+      issue: { id: issueId, title: "Reopen me" },
+    }).expect(200);
+
+    webhookCalls.length = 0;
+    const reopened = await request(app)
+      .patch(`/api/issues/${issueId}`)
+      .send({ status: "open" })
+      .expect(200);
+
+    assert.equal(reopened.body.delivery.success, true);
+    assert.equal(webhookCalls[0].url, "http://helix.test/runs/continuation-two/continuations");
+    assert.equal((webhookCalls[0].body as { trigger: string }).trigger, "issue.reopened");
+    assert.match(
+      (webhookCalls[0].body as { externalEventId: string }).externalEventId,
+      new RegExp(`^issue-reopened:${issueId}:`),
+    );
+  });
+
+  it("ordinary comments do not trigger Helix", async () => {
+    const created = await request(app)
+      .post("/api/issues")
+      .send({ title: "Just discussing", labels: [] })
+      .expect(201);
+    webhookCalls.length = 0;
+
+    const comment = await request(app)
+      .post(`/api/issues/${created.body.issue.id}/comments`)
+      .send({ body: "This is only a note" })
+      .expect(201);
+
+    assert.equal(comment.body.delivery, null);
+    assert.equal(webhookCalls.length, 0);
   });
 
   it("filters and paginates issue lists", async () => {

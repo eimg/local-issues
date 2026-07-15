@@ -80,9 +80,12 @@ npm run dev
 |---------|-------|
 | Webhook URL | `http://127.0.0.1:8319/runs` |
 | Label filter | `trigger` (default) |
+| Continuation comment command | `/helix` (default) |
 | Webhooks enabled | on |
 
 Create an open issue with the `trigger` label (or add the label to an existing issue). local-issues delivers a webhook; Helix starts a run. Watch progress in the Helix run console. On completion, Helix POSTs back and this tracker marks the issue **closed** with a Helix comment.
+
+After completion, reopen the issue or add a comment such as `/helix also cover the regression case`. The tracker uses the latest completed Helix run recorded from callbacks and sends a linked continuation request. Ordinary comments do not trigger Helix.
 
 Full Helix setup and config: [github.com/eimg/helix](https://github.com/eimg/helix#getting-started).
 
@@ -93,6 +96,7 @@ Full Helix setup and config: [github.com/eimg/helix](https://github.com/eimg/hel
 | Port | `8320` |
 | Webhook URL | *(empty — configure in Settings)* |
 | Label filter | `trigger` |
+| Continuation comment command | `/helix` |
 | Webhooks enabled | `false` |
 | Data directory | `./data/` (override with `LOCAL_ISSUES_DATA_DIR`) |
 
@@ -102,8 +106,9 @@ When webhooks are enabled and a URL is set, delivery fires on:
 
 1. **Issue created** — open issue includes the label filter
 2. **Label added** — filter label added to an open issue
-3. **Issue reopened** — open issue still has the filter label
-4. **Manual** — **Send webhook** button or `POST /api/issues/:id/trigger`
+3. **Issue reopened** — if a completed Helix run is known, continue it; otherwise start an initial run
+4. **Command comment** — a user comment beginning with the configured command continues the latest completed run
+5. **Manual** — **Send webhook** button or `POST /api/issues/:id/trigger`
 
 Outbound payload (includes correlation for Helix callbacks):
 
@@ -141,6 +146,8 @@ X-Helix-Event: run.completed
 ```
 
 → issue status `closed` + Helix comment
+
+The callback may include `parentRunId` and `rootRunId`. local-issues stores this lineage and uses the newest completed run when it delivers a reopen or command-comment continuation.
 
 **`run.started`** (supported by this tracker; Helix does not send it yet):
 

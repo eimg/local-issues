@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import {
   DEFAULT_LABEL_FILTER,
+  DEFAULT_COMMENT_TRIGGER,
   DEFAULT_WEBHOOK_URL,
   type AppConfig,
 } from "./types.js";
@@ -8,6 +9,7 @@ import {
 const DEFAULTS: AppConfig = {
   webhookUrl: DEFAULT_WEBHOOK_URL,
   labelFilter: DEFAULT_LABEL_FILTER,
+  commentTrigger: DEFAULT_COMMENT_TRIGGER,
   webhookEnabled: false,
   baseUrl: "http://127.0.0.1:8320",
 };
@@ -18,6 +20,7 @@ export function loadConfig(db: Database.Database): AppConfig {
   return {
     webhookUrl: stored.webhookUrl ?? DEFAULTS.webhookUrl,
     labelFilter: stored.labelFilter ?? DEFAULTS.labelFilter,
+    commentTrigger: stored.commentTrigger ?? DEFAULTS.commentTrigger,
     webhookEnabled: stored.webhookEnabled !== undefined ? stored.webhookEnabled === "true" : DEFAULTS.webhookEnabled,
     baseUrl: stored.baseUrl ?? DEFAULTS.baseUrl,
   };

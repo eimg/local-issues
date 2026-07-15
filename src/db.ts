@@ -63,6 +63,20 @@ function migrate(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
+
+    CREATE TABLE IF NOT EXISTS helix_runs (
+      run_id TEXT PRIMARY KEY,
+      issue_id INTEGER NOT NULL,
+      parent_run_id TEXT,
+      root_run_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_helix_runs_issue ON helix_runs(issue_id, finished_at DESC);
   `);
 
   migrateIssuesStatusConstraint(db);

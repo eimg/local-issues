@@ -384,13 +384,16 @@ async function addComment(e) {
   if (!body) return;
 
   try {
-    await api(`/api/issues/${state.selectedId}/comments`, {
+    const result = await api(`/api/issues/${state.selectedId}/comments`, {
       method: "POST",
       body: JSON.stringify({ body, author: "user" }),
     });
     els.commentForm.reset();
-    showToast("Comment added");
-    await loadComments(state.selectedId);
+    if (result.delivery?.success) showToast("Comment added — Helix continuation started");
+    else if (result.delivery) showToast("Comment added — continuation failed");
+    else showToast("Comment added");
+    await Promise.all([loadComments(state.selectedId), loadIssues(), loadDeliveries()]);
+    if (result.delivery?.success) startWatchingIssue(state.selectedId, result.issue?.status ?? "open");
   } catch (err) {
     showToast(err.message);
   }
@@ -561,6 +564,7 @@ els.settingsBtn.addEventListener("click", () => {
   const form = els.settingsForm;
   form.webhookUrl.value = state.config.webhookUrl;
   form.labelFilter.value = state.config.labelFilter;
+  form.commentTrigger.value = state.config.commentTrigger;
   form.webhookEnabled.checked = state.config.webhookEnabled;
   els.settingsDialog.showModal();
 });
@@ -575,6 +579,7 @@ els.settingsForm.addEventListener("submit", async (e) => {
     body: JSON.stringify({
       webhookUrl: fd.get("webhookUrl"),
       labelFilter: fd.get("labelFilter"),
+      commentTrigger: fd.get("commentTrigger"),
       webhookEnabled: fd.get("webhookEnabled") === "on",
     }),
   });
