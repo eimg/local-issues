@@ -6,7 +6,12 @@ import {
   recordDelivery,
   type AppConfig,
 } from "./issues.js";
-import type { Issue, WebhookDelivery, WebhookPayload } from "./types.js";
+import type {
+  ContinuationWebhookPayload,
+  Issue,
+  OutboundWebhookPayload,
+  WebhookDelivery,
+} from "./types.js";
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [0, 500, 1500];
@@ -61,10 +66,47 @@ export class WebhookDispatcher {
     return this.send(config.webhookUrl, issue.id, payload, reason, config.baseUrl);
   }
 
+  async dispatchContinuation(
+    issue: Issue,
+    parentRunId: string,
+    payload: ContinuationWebhookPayload,
+    reason: string,
+  ): Promise<WebhookDelivery | null> {
+    const config = loadConfig(this.db);
+    if (!config.webhookEnabled) return null;
+
+    const url = continuationUrl(config.webhookUrl, parentRunId);
+    if (!url) {
+      return recordDelivery(this.db, {
+        issueId: issue.id,
+        url: config.webhookUrl,
+        payload,
+        statusCode: null,
+        responseBody: null,
+        success: false,
+        attempts: 0,
+        error: `Skipped (${reason}): webhook URL must end in /runs`,
+      });
+    }
+    if (issue.status !== "open") {
+      return recordDelivery(this.db, {
+        issueId: issue.id,
+        url,
+        payload,
+        statusCode: null,
+        responseBody: null,
+        success: false,
+        attempts: 0,
+        error: `Skipped (${reason}): issue is ${issue.status}`,
+      });
+    }
+    return this.send(url, issue.id, payload, reason, config.baseUrl);
+  }
+
   async send(
     url: string,
     issueId: number,
-    payload: WebhookPayload,
+    payload: OutboundWebhookPayload,
     reason: string,
     trackerUrl?: string
   ): Promise<WebhookDelivery> {
@@ -122,6 +164,12 @@ export class WebhookDispatcher {
       error: lastError,
     });
   }
+}
+
+function continuationUrl(webhookUrl: string, parentRunId: string): string | undefined {
+  const normalized = webhookUrl.trim().replace(/\/+$/, "");
+  if (!normalized.endsWith("/runs")) return undefined;
+  return `${normalized}/${encodeURIComponent(parentRunId)}/continuations`;
 }
 
 function sleep(ms: number): Promise<void> {

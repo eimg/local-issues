@@ -77,7 +77,7 @@
               name="body"
               class="input comment-input"
               rows="3"
-              placeholder="Write a comment…"
+              placeholder="Write a comment… Use /helix to request continuation"
               required
             ></textarea>
             <div class="comment-form-actions">
@@ -132,6 +132,10 @@
       <label>
         Label filter
         <input name="labelFilter" class="input" />
+      </label>
+      <label>
+        Continuation comment command
+        <input name="commentTrigger" class="input" placeholder="/helix" />
       </label>
       <label class="checkbox-row">
         <input name="webhookEnabled" type="checkbox" />

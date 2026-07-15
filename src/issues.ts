@@ -218,7 +218,7 @@ export function listDeliveries(db: Database.Database, limit = 50): import("./typ
     id: row.id,
     issueId: row.issue_id,
     url: row.url,
-    payload: JSON.parse(row.payload) as { title: string; body: string; labels: string[] },
+    payload: JSON.parse(row.payload) as import("./types.js").OutboundWebhookPayload,
     statusCode: row.status_code,
     responseBody: row.response_body,
     success: row.success === 1,
@@ -243,7 +243,7 @@ export function recordDelivery(
   entry: {
     issueId: number;
     url: string;
-    payload: { title: string; body: string; labels: string[] };
+    payload: import("./types.js").OutboundWebhookPayload;
     statusCode: number | null;
     responseBody: string | null;
     success: boolean;

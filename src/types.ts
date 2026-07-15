@@ -28,6 +28,7 @@ export interface IssueUpdate {
 export interface AppConfig {
   webhookUrl: string;
   labelFilter: string;
+  commentTrigger: string;
   webhookEnabled: boolean;
   baseUrl: string;
 }
@@ -42,6 +43,14 @@ export interface WebhookPayload {
   };
 }
 
+export interface ContinuationWebhookPayload {
+  instruction: string;
+  externalEventId: string;
+  trigger: string;
+}
+
+export type OutboundWebhookPayload = WebhookPayload | ContinuationWebhookPayload;
+
 export interface HelixRunPayload {
   event: "run.started" | "run.completed";
   run: {
@@ -49,6 +58,8 @@ export interface HelixRunPayload {
     status: string;
     startedAt: number;
     finishedAt?: number;
+    parentRunId?: string;
+    rootRunId?: string;
   };
   issue: {
     id: number;
@@ -98,7 +109,7 @@ export interface WebhookDelivery {
   id: number;
   issueId: number;
   url: string;
-  payload: WebhookPayload;
+  payload: OutboundWebhookPayload;
   statusCode: number | null;
   responseBody: string | null;
   success: boolean;
@@ -110,3 +121,4 @@ export interface WebhookDelivery {
 export const DEFAULT_PORT = 8320;
 export const DEFAULT_WEBHOOK_URL = "";
 export const DEFAULT_LABEL_FILTER = "trigger";
+export const DEFAULT_COMMENT_TRIGGER = "/helix";

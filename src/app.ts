@@ -27,6 +27,7 @@ import {
 } from "./comments.js";
 import type { HelixRunPayload } from "./types.js";
 import { WebhookDispatcher } from "./webhooks.js";
+import { latestCompletedHelixRun, recordHelixRun } from "./helixRuns.js";
 
 const publicDir = join(dirname(fileURLToPath(import.meta.url)), "public");
 
@@ -56,6 +57,9 @@ export function createApp(opts: CreateAppOptions): Express {
     const patch: Record<string, unknown> = {};
     if (typeof body.webhookUrl === "string") patch.webhookUrl = body.webhookUrl.trim();
     if (typeof body.labelFilter === "string") patch.labelFilter = body.labelFilter.trim();
+    if (typeof body.commentTrigger === "string" && body.commentTrigger.trim()) {
+      patch.commentTrigger = body.commentTrigger.trim();
+    }
     if (typeof body.webhookEnabled === "boolean") patch.webhookEnabled = body.webhookEnabled;
     if (typeof body.baseUrl === "string") patch.baseUrl = body.baseUrl.trim();
     const config = saveConfig(db, patch as Parameters<typeof saveConfig>[1]);
@@ -103,7 +107,7 @@ export function createApp(opts: CreateAppOptions): Express {
     res.json(listComments(db, id));
   });
 
-  app.post("/api/issues/:id/comments", (req, res) => {
+  app.post("/api/issues/:id/comments", async (req, res) => {
     const config = loadConfig(db);
     const id = Number(req.params.id);
     const issue = getIssue(db, config.baseUrl, id);
@@ -123,7 +127,29 @@ export function createApp(opts: CreateAppOptions): Express {
       author: typeof body.author === "string" ? body.author : "user",
       source: "user",
     });
-    res.status(201).json(comment);
+
+    const instruction = continuationInstruction(comment.body, config.commentTrigger);
+    let delivery = null;
+    let currentIssue = issue;
+    if (instruction && config.webhookEnabled) {
+      const parent = latestCompletedHelixRun(db, id);
+      if (parent) {
+        if (currentIssue.status !== "open") {
+          currentIssue = updateIssue(db, config.baseUrl, id, { status: "open" }) ?? currentIssue;
+        }
+        delivery = await dispatcher.dispatchContinuation(
+          currentIssue,
+          parent.runId,
+          {
+            instruction,
+            externalEventId: `comment:${comment.id}`,
+            trigger: "issue.comment",
+          },
+          "issue.comment",
+        );
+      }
+    }
+    res.status(201).json({ ...comment, delivery, issue: currentIssue });
   });
 
   app.patch("/api/issues/:issueId/comments/:commentId", (req, res) => {
@@ -246,10 +272,23 @@ export function createApp(opts: CreateAppOptions): Express {
       issueMatchesFilter(issue, config.labelFilter) &&
       (labelAdded || reopened)
     ) {
-      delivery = await dispatcher.dispatchForIssue(
-        issue,
-        labelAdded ? "issue.label_added" : "issue.reopened"
-      );
+      if (reopened) {
+        const parent = latestCompletedHelixRun(db, issue.id);
+        delivery = parent
+          ? await dispatcher.dispatchContinuation(
+              issue,
+              parent.runId,
+              {
+                instruction: "Issue reopened. Re-evaluate the original issue and address any remaining work.",
+                externalEventId: `issue-reopened:${issue.id}:${issue.updatedAt}`,
+                trigger: "issue.reopened",
+              },
+              "issue.reopened",
+            )
+          : await dispatcher.dispatchForIssue(issue, "issue.reopened");
+      } else {
+        delivery = await dispatcher.dispatchForIssue(issue, "issue.label_added");
+      }
     }
 
     res.json({ issue, delivery });
@@ -320,6 +359,7 @@ export function createApp(opts: CreateAppOptions): Express {
     }
 
     const payload = req.body as HelixRunPayload;
+    recordHelixRun(db, issueId, payload);
 
     if (event === "run.started") {
       if (existing.status === "closed") {
@@ -372,4 +412,14 @@ function parseStatus(value: unknown): IssueStatus | undefined {
 function parseLabels(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((l): l is string => typeof l === "string");
+}
+
+function continuationInstruction(commentBody: string, command: string): string | undefined {
+  const body = commentBody.trim();
+  const trigger = command.trim();
+  if (!trigger) return undefined;
+  if (body === trigger) return undefined;
+  if (!body.startsWith(`${trigger} `) && !body.startsWith(`${trigger}\n`)) return undefined;
+  const instruction = body.slice(trigger.length).trim();
+  return instruction || undefined;
 }
