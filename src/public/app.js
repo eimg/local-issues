@@ -629,6 +629,8 @@ for (const btn of els.filterBtns) {
 async function init() {
   await loadConfig();
   await Promise.all([loadIssues(), loadDeliveries()]);
+  const deepLink = Number(new URLSearchParams(location.search).get("issue"));
+  if (Number.isInteger(deepLink) && deepLink > 0) await selectIssue(deepLink);
 }
 
 init().catch((err) => showToast(err.message));

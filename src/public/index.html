@@ -3,67 +3,150 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light" />
   <title>Local Issues</title>
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M11 8v16M21 8v16M8 13h16M8 19h16' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E"
+  />
   <link rel="stylesheet" href="/app.css" />
 </head>
 <body>
-  <header class="header">
-    <div>
-      <h1>Local Issues</h1>
-      <p class="subtitle">Small local issue tracker with outbound webhooks</p>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="8" fill="url(#brand-gradient)" />
+          <path d="M11 8v16M21 8v16M8 13h16M8 19h16" stroke="#fff" stroke-width="2.6" stroke-linecap="round" />
+          <defs>
+            <linearGradient id="brand-gradient" x1="0" y1="0" x2="32" y2="32">
+              <stop offset="0" stop-color="#6366f1" />
+              <stop offset="1" stop-color="#4f46e5" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </span>
+      <div class="brand-text">
+        <h1>Local Issues</h1>
+        <p class="brand-tagline">Local issue tracker with outbound webhooks</p>
+      </div>
     </div>
     <div class="header-actions">
-      <button id="settings-btn" class="btn btn-ghost" type="button">Settings</button>
-      <button id="new-issue-btn" class="btn btn-primary" type="button">New issue</button>
+      <button id="settings-btn" class="btn btn-ghost" type="button">
+        <svg class="icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path
+            d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"
+            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+          />
+          <path
+            d="M16.7 12.2a1.4 1.4 0 0 0 .28 1.54l.05.06a1.7 1.7 0 1 1-2.4 2.4l-.06-.05a1.4 1.4 0 0 0-1.54-.28 1.4 1.4 0 0 0-.85 1.28v.17a1.7 1.7 0 1 1-3.4 0v-.09a1.4 1.4 0 0 0-.93-1.28 1.4 1.4 0 0 0-1.54.28l-.06.05a1.7 1.7 0 1 1-2.4-2.4l.05-.06a1.4 1.4 0 0 0 .28-1.54 1.4 1.4 0 0 0-1.28-.85h-.17a1.7 1.7 0 1 1 0-3.4h.09a1.4 1.4 0 0 0 1.28-.93 1.4 1.4 0 0 0-.28-1.54l-.05-.06a1.7 1.7 0 1 1 2.4-2.4l.06.05a1.4 1.4 0 0 0 1.54.28h.08a1.4 1.4 0 0 0 .85-1.28v-.17a1.7 1.7 0 1 1 3.4 0v.09a1.4 1.4 0 0 0 .85 1.28 1.4 1.4 0 0 0 1.54-.28l.06-.05a1.7 1.7 0 1 1 2.4 2.4l-.05.06a1.4 1.4 0 0 0-.28 1.54v.08a1.4 1.4 0 0 0 1.28.85h.17a1.7 1.7 0 1 1 0 3.4h-.09a1.4 1.4 0 0 0-1.28.85Z"
+            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+          />
+        </svg>
+        Settings
+      </button>
+      <button id="new-issue-btn" class="btn btn-primary" type="button">
+        <svg class="icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path d="M10 4.5v11M4.5 10h11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
+        New issue
+      </button>
     </div>
   </header>
 
   <main class="layout">
-    <section class="panel issues-panel">
+    <section class="panel issues-panel" aria-label="Issue list">
       <div class="panel-header issues-panel-header">
-        <h2>Issues</h2>
-        <div class="filters">
-          <button class="filter-btn active" data-status="">All</button>
-          <button class="filter-btn" data-status="open">Open</button>
-          <button class="filter-btn" data-status="in_progress">In progress</button>
-          <button class="filter-btn" data-status="closed">Closed</button>
+        <div class="panel-title-row">
+          <h2>Issues</h2>
+        </div>
+        <div class="filters" role="group" aria-label="Filter by status">
+          <button class="filter-btn active" data-status="" type="button">All</button>
+          <button class="filter-btn" data-status="open" type="button">Open</button>
+          <button class="filter-btn" data-status="in_progress" type="button">In progress</button>
+          <button class="filter-btn" data-status="closed" type="button">Closed</button>
         </div>
         <div class="list-toolbar">
+          <svg class="icon toolbar-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path
+              d="m17 17-3.8-3.8m1.05-4.45a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0Z"
+              stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+            />
+          </svg>
           <input
             id="label-filter"
             class="input label-filter-input"
             type="text"
             placeholder="Filter by label"
+            autocomplete="off"
           />
         </div>
       </div>
       <ul id="issue-list" class="issue-list"></ul>
       <div class="pager">
-        <button id="prev-page-btn" class="btn btn-ghost btn-sm" type="button" disabled>Prev</button>
+        <button id="prev-page-btn" class="btn btn-ghost btn-sm" type="button" disabled>
+          <svg class="icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M12.5 15 7.5 10l5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          Prev
+        </button>
         <span id="page-info" class="page-info">—</span>
-        <button id="next-page-btn" class="btn btn-ghost btn-sm" type="button" disabled>Next</button>
+        <button id="next-page-btn" class="btn btn-ghost btn-sm" type="button" disabled>
+          Next
+          <svg class="icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="m7.5 5 5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
       </div>
     </section>
 
-    <section class="panel detail-panel">
+    <section class="panel detail-panel" aria-label="Issue detail">
       <div id="empty-state" class="empty-state">
-        <p>Select an issue or create a new one.</p>
+        <svg class="empty-illustration" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+          <rect x="18" y="30" width="84" height="64" rx="10" fill="#eef0f6" />
+          <rect x="18" y="30" width="84" height="64" rx="10" stroke="#d6dbe8" stroke-width="2" />
+          <path d="M18 44a10 10 0 0 1 10-10h64a10 10 0 0 1 10 10v6H18v-6Z" fill="#e2e6f0" />
+          <circle cx="32" cy="42" r="3" fill="#c3cadd" />
+          <circle cx="42" cy="42" r="3" fill="#c3cadd" />
+          <rect x="32" y="62" width="40" height="6" rx="3" fill="#c3cadd" />
+          <rect x="32" y="74" width="56" height="6" rx="3" fill="#d6dbe8" />
+          <circle cx="88" cy="80" r="16" fill="#4f46e5" />
+          <path d="M88 72v16M80 80h16" stroke="#fff" stroke-width="3" stroke-linecap="round" />
+        </svg>
+        <p class="empty-title">No issue selected</p>
+        <p class="empty-hint">Pick an issue from the list, or create a new one to get started.</p>
       </div>
       <div id="issue-detail" class="issue-detail hidden">
         <div class="detail-header">
           <span id="issue-number" class="issue-number"></span>
           <div class="detail-actions">
-            <button id="trigger-btn" class="btn btn-secondary" type="button">Send webhook</button>
+            <button id="trigger-btn" class="btn btn-secondary" type="button">
+              <svg class="icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path
+                  d="M11 2 4.5 11H9l-1 7 6.5-9H10l1-7Z"
+                  stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+                />
+              </svg>
+              Send webhook
+            </button>
             <button id="toggle-status-btn" class="btn btn-ghost" type="button"></button>
-            <button id="delete-btn" class="btn btn-danger" type="button">Delete</button>
+            <button id="delete-btn" class="btn btn-danger" type="button">
+              <svg class="icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path
+                  d="M3.5 5.5h13M8 5V3.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V5m3 0-.6 10.1a1.6 1.6 0 0 1-1.6 1.5H7.2a1.6 1.6 0 0 1-1.6-1.5L5 5.5"
+                  stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+                />
+              </svg>
+              Delete
+            </button>
           </div>
         </div>
-        <input id="detail-title" class="input title-input" type="text" />
-        <textarea id="detail-body" class="input body-input" rows="12"></textarea>
+        <input id="detail-title" class="input title-input" type="text" autocomplete="off" />
+        <textarea id="detail-body" class="input body-input" rows="12" spellcheck="false"></textarea>
         <div class="labels-row">
           <label for="detail-labels">Labels</label>
           <div class="labels-row-fields">
-            <input id="detail-labels" class="input" type="text" placeholder="trigger, bug, docs" />
+            <input id="detail-labels" class="input" type="text" placeholder="trigger, bug, docs" autocomplete="off" />
             <button id="save-btn" class="btn btn-primary" type="button">Save</button>
           </div>
         </div>
@@ -88,12 +171,20 @@
       </div>
     </section>
 
-    <section class="panel deliveries-panel">
+    <section class="panel deliveries-panel" aria-label="Webhook deliveries">
       <div class="panel-header">
         <h2>Webhook deliveries</h2>
         <div class="panel-header-actions">
-          <button id="clear-deliveries-btn" class="btn btn-ghost" type="button">Clear</button>
-          <button id="refresh-deliveries-btn" class="btn btn-ghost" type="button">Refresh</button>
+          <button id="refresh-deliveries-btn" class="btn btn-ghost btn-sm" type="button">
+            <svg class="icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path
+                d="M16.5 10a6.5 6.5 0 1 1-1.9-4.6M16.5 3.5v3h-3"
+                stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+              />
+            </svg>
+            Refresh
+          </button>
+          <button id="clear-deliveries-btn" class="btn btn-ghost btn-sm" type="button">Clear</button>
         </div>
       </div>
       <ul id="delivery-list" class="delivery-list"></ul>
@@ -103,21 +194,22 @@
   <dialog id="new-issue-dialog" class="dialog">
     <form id="new-issue-form" method="dialog">
       <h2>New issue</h2>
-      <label>
-        Title
-        <input name="title" class="input" required />
+      <p class="dialog-subtitle">File a bug, task, or idea — stored locally in SQLite.</p>
+      <label class="field">
+        <span class="field-label">Title</span>
+        <input name="title" class="input" required autocomplete="off" placeholder="Short, descriptive summary" />
       </label>
-      <label>
-        Body
-        <textarea name="body" class="input" rows="8"></textarea>
+      <label class="field">
+        <span class="field-label">Body</span>
+        <textarea name="body" class="input" rows="7" placeholder="Steps to reproduce, expected behavior, context…"></textarea>
       </label>
-      <label>
-        Labels
-        <input name="labels" class="input" placeholder="trigger, bug" />
+      <label class="field">
+        <span class="field-label">Labels</span>
+        <input name="labels" class="input" placeholder="trigger, bug" autocomplete="off" />
       </label>
       <div class="dialog-actions">
         <button class="btn btn-ghost" value="cancel" type="submit">Cancel</button>
-        <button class="btn btn-primary" value="create" type="submit">Create</button>
+        <button class="btn btn-primary" value="create" type="submit">Create issue</button>
       </div>
     </form>
   </dialog>
@@ -125,30 +217,31 @@
   <dialog id="settings-dialog" class="dialog">
     <form id="settings-form" method="dialog">
       <h2>Settings</h2>
-      <label>
-        Webhook URL
-        <input name="webhookUrl" class="input" />
+      <p class="dialog-subtitle">Configure outbound webhooks and Helix integration.</p>
+      <label class="field">
+        <span class="field-label">Webhook URL</span>
+        <input name="webhookUrl" class="input" placeholder="http://127.0.0.1:8319/runs" autocomplete="off" />
       </label>
-      <label>
-        Label filter
-        <input name="labelFilter" class="input" />
+      <label class="field">
+        <span class="field-label">Label filter</span>
+        <input name="labelFilter" class="input" placeholder="trigger" autocomplete="off" />
       </label>
-      <label>
-        Continuation comment command
-        <input name="commentTrigger" class="input" placeholder="/helix" />
+      <label class="field">
+        <span class="field-label">Continuation comment command</span>
+        <input name="commentTrigger" class="input" placeholder="/helix" autocomplete="off" />
       </label>
       <label class="checkbox-row">
         <input name="webhookEnabled" type="checkbox" />
-        Enable webhooks
+        <span>Enable webhooks</span>
       </label>
       <div class="dialog-actions">
         <button class="btn btn-ghost" value="cancel" type="submit">Cancel</button>
-        <button class="btn btn-primary" value="save" type="submit">Save</button>
+        <button class="btn btn-primary" value="save" type="submit">Save settings</button>
       </div>
     </form>
   </dialog>
 
-  <div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <script src="/app.js" type="module"></script>
 </body>
 </html>
