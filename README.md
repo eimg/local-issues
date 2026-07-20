@@ -6,14 +6,14 @@ Pairs naturally with [Helix](https://github.com/eimg/helix) for local agent-driv
 
 ## Acme development testbed
 
-Acme Issues is one of four related local projects. They remain separate products with separate responsibilities.
+Acme Issues is one of four related projects. They remain separate products with separate responsibilities.
 
-| Project | Local path | Role |
-|---|---|---|
-| **Primer** | `~/Desktop/acme/primer` | Knowledge product and fictional Acme evidence corpus; not currently part of the runtime loop. |
-| **Helix** | `~/Desktop/acme/helix` | Agent workflow control plane that receives work and orchestrates changes. |
-| **Acme Issues** | `~/Desktop/acme/acme-issues` | Local issue tracker and webhook harness that triggers Helix and receives callbacks. |
-| **Acme Todo** | `~/Desktop/acme/acme-todo` | Disposable target application used for agent implementation and verification. |
+| Project | Role |
+|---|---|
+| **[Primer](https://github.com/eimg/primer)** | Knowledge product and fictional Acme evidence corpus; not currently part of the runtime loop. |
+| **[Helix](https://github.com/eimg/helix)** | Agent workflow control plane that receives work and orchestrates changes. |
+| **[Acme Issues](https://github.com/eimg/acme-issues)** | Local issue tracker and webhook harness that triggers Helix and receives callbacks. |
+| **[Acme Todo](https://github.com/eimg/acme-todo)** | Disposable target application used for agent implementation and verification. |
 
 Typical exercise: Acme Issues sends a work item to Helix, which works on Acme Todo. Primer develops the separate knowledge and retrieval side of the same fictional Acme context.
 
