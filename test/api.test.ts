@@ -9,14 +9,14 @@ import { createApp } from "../src/app.js";
 import { WebhookDispatcher } from "../src/webhooks.js";
 import { saveConfig } from "../src/config.js";
 
-describe("local-issues API", () => {
+describe("acme-issues API", () => {
   let dataDir: string;
   let db: ReturnType<typeof openDatabase>;
   let app: ReturnType<typeof createApp>;
   let webhookCalls: { url: string; body: unknown }[];
 
   before(() => {
-    dataDir = mkdtempSync(join(tmpdir(), "local-issues-"));
+    dataDir = mkdtempSync(join(tmpdir(), "acme-issues-"));
     db = openDatabase(dataDir);
     saveConfig(db, {
       webhookUrl: "http://helix.test/runs",

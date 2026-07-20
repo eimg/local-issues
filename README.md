@@ -1,10 +1,23 @@
-# Local Issues
+# Acme Issues
 
 A small, self-contained issue tracker for local development. Issues live in SQLite; outbound webhooks POST JSON to any URL you configure.
 
 Pairs naturally with [Helix](https://github.com/eimg/helix) for local agent-driven workflows — no GitHub account required.
 
-![Local Issues](https://i.imgur.com/icyJMPP.jpeg)
+## Acme development testbed
+
+Acme Issues is one of four related local projects. They remain separate products with separate responsibilities.
+
+| Project | Local path | Role |
+|---|---|---|
+| **Primer** | `~/Desktop/acme/primer` | Knowledge product and fictional Acme evidence corpus; not currently part of the runtime loop. |
+| **Helix** | `~/Desktop/acme/helix` | Agent workflow control plane that receives work and orchestrates changes. |
+| **Acme Issues** | `~/Desktop/acme/acme-issues` | Local issue tracker and webhook harness that triggers Helix and receives callbacks. |
+| **Acme Todo** | `~/Desktop/acme/acme-todo` | Disposable target application used for agent implementation and verification. |
+
+Typical exercise: Acme Issues sends a work item to Helix, which works on Acme Todo. Primer develops the separate knowledge and retrieval side of the same fictional Acme context.
+
+![Acme Issues](https://i.imgur.com/icyJMPP.jpeg)
 
 ## Companion project: [Helix](https://github.com/eimg/helix)
 
@@ -12,11 +25,11 @@ This tracker is built to pair with **[Helix](https://github.com/eimg/helix)** �
 
 | Project | Role |
 |---------|------|
-| **local-issues** (this repo) | Create and track issues locally; fire webhooks when labeled issues appear |
+| **acme-issues** (this repo) | Create and track issues locally; fire webhooks when labeled issues appear |
 | **[Helix](https://github.com/eimg/helix)** | Receives `POST /runs`, orchestrates agents, optionally callbacks on completion |
 
 ```
-local-issues (issue + label) ──POST──► Helix /runs ──► specialist agents
+acme-issues (issue + label) ──POST──► Helix /runs ──► specialist agents
        ▲                                        │
        └──────── run.completed callback ────────┘
 ```
@@ -30,11 +43,11 @@ No GitHub account or `gh` CLI required for this loop.
 ## Install
 
 ```bash
-git clone https://github.com/eimg/local-issues.git
-cd local-issues
+git clone https://github.com/eimg/acme-issues.git
+cd acme-issues
 npm install
 npm run build    # optional; dev mode compiles on the fly
-npm link         # optional; exposes `local-issues` CLI
+npm link         # optional; exposes `acme-issues` CLI
 ```
 
 ## Getting started
@@ -65,11 +78,11 @@ helix serve
 # → http://127.0.0.1:8319/
 ```
 
-**Terminal 2 — local-issues**
+**Terminal 2 — acme-issues**
 
 ```bash
-git clone https://github.com/eimg/local-issues.git
-cd local-issues && npm install
+git clone https://github.com/eimg/acme-issues.git
+cd acme-issues && npm install
 npm run dev
 # → http://127.0.0.1:8320/
 ```
@@ -83,7 +96,7 @@ npm run dev
 | Continuation comment command | `/helix` (default) |
 | Webhooks enabled | on |
 
-Create an open issue with the `trigger` label (or add the label to an existing issue). local-issues delivers a webhook; Helix starts a run. Watch progress in the Helix run console. On completion, Helix POSTs back and this tracker marks the issue **closed** with a Helix comment.
+Create an open issue with the `trigger` label (or add the label to an existing issue). acme-issues delivers a webhook; Helix starts a run. Watch progress in the Helix run console. On completion, Helix POSTs back and this tracker marks the issue **closed** with a Helix comment.
 
 After completion, reopen the issue or add a comment such as `/helix also cover the regression case`. The tracker uses the latest completed Helix run recorded from callbacks and sends a linked continuation request. Ordinary comments do not trigger Helix.
 
@@ -98,7 +111,7 @@ Full Helix setup and config: [github.com/eimg/helix](https://github.com/eimg/hel
 | Label filter | `trigger` |
 | Continuation comment command | `/helix` |
 | Webhooks enabled | `false` |
-| Data directory | `./data/` (override with `LOCAL_ISSUES_DATA_DIR`) |
+| Data directory | `./data/` (override with `ACME_ISSUES_DATA_DIR`) |
 
 ## Webhook behavior
 
@@ -147,7 +160,7 @@ X-Helix-Event: run.completed
 
 → issue status `closed` + Helix comment
 
-The callback may include `parentRunId` and `rootRunId`. local-issues stores this lineage and uses the newest completed run when it delivers a reopen or command-comment continuation.
+The callback may include `parentRunId` and `rootRunId`. acme-issues stores this lineage and uses the newest completed run when it delivers a reopen or command-comment continuation.
 
 **`run.started`** (supported by this tracker; Helix does not send it yet):
 

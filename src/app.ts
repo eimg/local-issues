@@ -400,7 +400,7 @@ export function startServer(opts: CreateAppOptions & { port: number; host?: stri
 
   const app = createApp(opts);
   app.listen(opts.port, host, () => {
-    console.log(`Local Issues  ${baseUrl}`);
+    console.log(`Acme Issues  ${baseUrl}`);
   });
 }
 

@@ -1,5 +1,5 @@
 {
-  "name": "local-issues",
+  "name": "acme-issues",
   "version": "0.1.0",
   "private": false,
   "type": "module",
@@ -16,17 +16,17 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/eimg/local-issues.git"
+    "url": "git+https://github.com/eimg/acme-issues.git"
   },
   "bugs": {
-    "url": "https://github.com/eimg/local-issues/issues"
+    "url": "https://github.com/eimg/acme-issues/issues"
   },
-  "homepage": "https://github.com/eimg/local-issues#readme",
+  "homepage": "https://github.com/eimg/acme-issues#readme",
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "local-issues": "./dist/cli.js"
+    "acme-issues": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc && cp -r src/public dist/",

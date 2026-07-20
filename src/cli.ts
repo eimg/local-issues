@@ -5,10 +5,10 @@ import { DEFAULT_PORT } from "./types.js";
 
 function usage(): never {
   console.error(`Usage:
-  local-issues serve [--port <n>] [--host <host>]
+  acme-issues serve [--port <n>] [--host <host>]
 
 Environment:
-  LOCAL_ISSUES_DATA_DIR   Directory for SQLite database (default: ./data)
+  ACME_ISSUES_DATA_DIR   Directory for SQLite database (default: ./data)
   PORT                    Default port if --port not given`);
   process.exit(2);
 }

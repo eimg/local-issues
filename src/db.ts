@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 export function resolveDataDir(): string {
-  return process.env.LOCAL_ISSUES_DATA_DIR ?? join(projectRoot, "data");
+  return process.env.ACME_ISSUES_DATA_DIR ?? process.env.LOCAL_ISSUES_DATA_DIR ?? join(projectRoot, "data");
 }
 
 export function openDatabase(dataDir = resolveDataDir()): Database.Database {
