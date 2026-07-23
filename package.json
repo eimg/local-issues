@@ -29,7 +29,7 @@
     "acme-issues": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc && tsc -p web/tsconfig.json && vite build && cp -r src/public dist/",
+    "build": "tsc && tsc -p web/tsconfig.json && vite build",
     "build:web": "vite build",
     "dev:web": "vite --host 127.0.0.1",
     "typecheck:web": "tsc -p web/tsconfig.json",

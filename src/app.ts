@@ -47,7 +47,6 @@ import {
 import { readPullRequestDiff } from "./pullRequestDiff.js";
 import { browseRepositoryDirectories, validateRepositoryPath } from "./repositoryBrowser.js";
 
-const publicDir = join(dirname(fileURLToPath(import.meta.url)), "public");
 const bundledReactDir = join(dirname(fileURLToPath(import.meta.url)), "react");
 const reactDir = existsSync(bundledReactDir)
   ? bundledReactDir
@@ -67,7 +66,6 @@ export function createApp(opts: CreateAppOptions): Express {
   const app = express();
 
   app.use(express.json());
-  app.use(express.static(publicDir, { index: false }));
   app.use(express.static(reactDir, { index: false }));
   app.get(["/react", "/react/"], (_req, res) => res.redirect("/"));
 
@@ -586,9 +584,6 @@ export function createApp(opts: CreateAppOptions): Express {
     res.status(200).json({ ok: true, issue, comment });
   });
 
-  app.get("/legacy", (_req, res) => {
-    res.sendFile(join(publicDir, "index.html"));
-  });
   app.get("/", (_req, res) => {
     res.sendFile(reactIndex);
   });

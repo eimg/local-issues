@@ -250,10 +250,8 @@ Pull-request status values: `draft`, `reviewing`, `changes_requested`, `blocked`
 
 ## Development
 
-The React and TanStack Query interface is served at `/`. The previous
-dependency-free interface remains available at `/legacy` for comparison after
-`npm run build`. The development command rebuilds the React bundle before
-starting the local server.
+The React and TanStack Query interface is served at `/`. The development
+command rebuilds the React bundle before starting the local server.
 
 ```bash
 npm run dev -- --port 8320
