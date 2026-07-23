@@ -18,6 +18,7 @@ import {
 import type { IssueStatus } from "./types.js";
 import {
   addHelixCompletionComment,
+  addHelixPullRequestComment,
   addHelixStartComment,
   createComment,
   deleteComment,
@@ -26,8 +27,24 @@ import {
   updateComment,
 } from "./comments.js";
 import type { HelixRunPayload } from "./types.js";
+import type {
+  HelixPullRequestReviewPayload,
+  PullRequestOrigin,
+  PullRequestStatus,
+} from "./types.js";
 import { WebhookDispatcher } from "./webhooks.js";
 import { latestCompletedHelixRun, recordHelixRun } from "./helixRuns.js";
+import {
+  createPullRequest,
+  getPullRequest,
+  hasUnmergedPullRequest,
+  listPullRequestReviews,
+  listPullRequests,
+  recordPullRequestReview,
+  updatePullRequest,
+} from "./pullRequests.js";
+import { readPullRequestDiff } from "./pullRequestDiff.js";
+import { browseRepositoryDirectories, validateRepositoryPath } from "./repositoryBrowser.js";
 
 const publicDir = join(dirname(fileURLToPath(import.meta.url)), "public");
 
@@ -52,7 +69,7 @@ export function createApp(opts: CreateAppOptions): Express {
     res.json(loadConfig(db));
   });
 
-  app.patch("/api/config", (req, res) => {
+  app.patch("/api/config", async (req, res) => {
     const body = req.body as Record<string, unknown>;
     const patch: Record<string, unknown> = {};
     if (typeof body.webhookUrl === "string") patch.webhookUrl = body.webhookUrl.trim();
@@ -62,8 +79,30 @@ export function createApp(opts: CreateAppOptions): Express {
     }
     if (typeof body.webhookEnabled === "boolean") patch.webhookEnabled = body.webhookEnabled;
     if (typeof body.baseUrl === "string") patch.baseUrl = body.baseUrl.trim();
+    if (typeof body.defaultRepositoryPath === "string") {
+      const input = body.defaultRepositoryPath.trim();
+      try {
+        patch.defaultRepositoryPath = input ? await validateRepositoryPath(input) : "";
+      } catch (err) {
+        res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+    }
     const config = saveConfig(db, patch as Parameters<typeof saveConfig>[1]);
     res.json(config);
+  });
+
+  app.get("/api/repositories/browse", async (req, res) => {
+    const config = loadConfig(db);
+    const requestedPath =
+      typeof req.query.path === "string" && req.query.path.trim()
+        ? req.query.path.trim()
+        : config.defaultRepositoryPath || dirname(process.cwd());
+    try {
+      res.json(await browseRepositoryDirectories(requestedPath));
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   app.get("/api/issues", (req, res) => {
@@ -316,6 +355,137 @@ export function createApp(opts: CreateAppOptions): Express {
     res.json({ issue, delivery });
   });
 
+  app.get("/api/pull-requests", (req, res) => {
+    const status = parsePullRequestStatus(req.query.status);
+    res.json(listPullRequests(db, status));
+  });
+
+  app.post("/api/pull-requests", (req, res) => {
+    const body = req.body as Record<string, unknown>;
+    const required = [
+      "title",
+      "repositoryPath",
+      "baseBranch",
+      "baseSha",
+      "headBranch",
+      "headSha",
+    ] as const;
+    for (const field of required) {
+      if (typeof body[field] !== "string" || !body[field].trim()) {
+        res.status(400).json({ error: `${field} is required` });
+        return;
+      }
+    }
+    const issueId = optionalPositiveInteger(body.issueId);
+    if (body.issueId !== undefined && !issueId) {
+      res.status(400).json({ error: "issueId must be a positive integer" });
+      return;
+    }
+    if (issueId) {
+      const config = loadConfig(db);
+      if (!getIssue(db, config.baseUrl, issueId)) {
+        res.status(404).json({ error: "Issue not found" });
+        return;
+      }
+    }
+    const origin = parsePullRequestOrigin(body.origin);
+    if (body.origin !== undefined && !origin) {
+      res.status(400).json({ error: "origin must be helix or external" });
+      return;
+    }
+    const pullRequest = createPullRequest(db, {
+      issueId,
+      title: String(body.title),
+      description: typeof body.description === "string" ? body.description : "",
+      repositoryPath: String(body.repositoryPath),
+      baseBranch: String(body.baseBranch),
+      baseSha: String(body.baseSha),
+      headBranch: String(body.headBranch),
+      headSha: String(body.headSha),
+      author: typeof body.author === "string" ? body.author : "unknown",
+      origin,
+    });
+    res.status(201).json(pullRequest);
+  });
+
+  app.get("/api/pull-requests/:id", (req, res) => {
+    const id = Number(req.params.id);
+    const pullRequest = getPullRequest(db, id);
+    if (!pullRequest) {
+      res.status(404).json({ error: "Pull request not found" });
+      return;
+    }
+    res.json({
+      ...pullRequest,
+      reviews: listPullRequestReviews(db, pullRequest.id),
+    });
+  });
+
+  app.get("/api/pull-requests/:id/diff", async (req, res) => {
+    const pullRequest = getPullRequest(db, Number(req.params.id));
+    if (!pullRequest) {
+      res.status(404).json({ error: "Pull request not found" });
+      return;
+    }
+    try {
+      res.json(await readPullRequestDiff(pullRequest));
+    } catch (err) {
+      res.status(422).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.patch("/api/pull-requests/:id", (req, res) => {
+    const id = Number(req.params.id);
+    const existing = getPullRequest(db, id);
+    if (!existing) {
+      res.status(404).json({ error: "Pull request not found" });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const status = body.status === undefined ? undefined : parseMutablePullRequestStatus(body.status);
+    if (body.status !== undefined && !status) {
+      res.status(400).json({ error: "status can only be draft, merged, or closed" });
+      return;
+    }
+    if (status === "merged" && existing.status !== "ready_to_merge") {
+      res.status(409).json({ error: "Only a ready-to-merge pull request can be marked merged" });
+      return;
+    }
+    const pullRequest = updatePullRequest(db, id, {
+      title: typeof body.title === "string" ? body.title : undefined,
+      description: typeof body.description === "string" ? body.description : undefined,
+      baseBranch: typeof body.baseBranch === "string" ? body.baseBranch : undefined,
+      baseSha: typeof body.baseSha === "string" ? body.baseSha : undefined,
+      headBranch: typeof body.headBranch === "string" ? body.headBranch : undefined,
+      headSha: typeof body.headSha === "string" ? body.headSha : undefined,
+      author: typeof body.author === "string" ? body.author : undefined,
+      status,
+      mergeCommitSha: typeof body.mergeCommitSha === "string" ? body.mergeCommitSha : undefined,
+    });
+    if (pullRequest?.status === "merged" && pullRequest.issueId) {
+      const config = loadConfig(db);
+      updateIssue(db, config.baseUrl, pullRequest.issueId, { status: "closed" });
+    }
+    res.json(pullRequest);
+  });
+
+  app.post("/api/pull-requests/:id/review", async (req, res) => {
+    const id = Number(req.params.id);
+    const pullRequest = getPullRequest(db, id);
+    if (!pullRequest) {
+      res.status(404).json({ error: "Pull request not found" });
+      return;
+    }
+    if (pullRequest.status === "merged" || pullRequest.status === "closed") {
+      res.status(409).json({ error: `Pull request is ${pullRequest.status}` });
+      return;
+    }
+    const delivery = await dispatcher.dispatchPullRequestReview(pullRequest);
+    res.status(delivery.success ? 202 : 502).json({ pullRequest, delivery });
+  });
+
   app.get("/api/webhooks/deliveries", (req, res) => {
     const limit = Number(req.query.limit ?? 50);
     res.json(listDeliveries(db, Number.isFinite(limit) ? limit : 50));
@@ -339,6 +509,17 @@ export function createApp(opts: CreateAppOptions): Express {
     const event =
       (typeof req.headers["x-helix-event"] === "string" ? req.headers["x-helix-event"] : undefined) ??
       (typeof req.body?.event === "string" ? req.body.event : undefined);
+
+    if (event === "pr.review.started" || event === "pr.review.completed") {
+      const payload = req.body as HelixPullRequestReviewPayload;
+      const recorded = recordPullRequestReview(db, payload);
+      if (!recorded) {
+        res.status(404).json({ error: "Pull request not found or invalid review payload" });
+        return;
+      }
+      res.status(200).json({ ok: true, ...recorded });
+      return;
+    }
 
     if (event !== "run.started" && event !== "run.completed") {
       res.status(200).json({ ok: true, ignored: true, event: event ?? null });
@@ -381,6 +562,15 @@ export function createApp(opts: CreateAppOptions): Express {
       return;
     }
 
+    if (hasUnmergedPullRequest(db, issueId)) {
+      const issue = existing.status === "in_progress"
+        ? existing
+        : updateIssue(db, config.baseUrl, issueId, { status: "in_progress" });
+      const comment = addHelixPullRequestComment(db, issueId, payload);
+      res.status(200).json({ ok: true, issue, comment, awaitingPullRequest: true });
+      return;
+    }
+
     const issue = updateIssue(db, config.baseUrl, issueId, { status: "closed" });
     const comment = addHelixCompletionComment(db, issueId, payload);
     res.status(200).json({ ok: true, issue, comment });
@@ -412,6 +602,32 @@ function parseStatus(value: unknown): IssueStatus | undefined {
 function parseLabels(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((l): l is string => typeof l === "string");
+}
+
+function parsePullRequestStatus(value: unknown): PullRequestStatus | undefined {
+  return value === "draft" ||
+    value === "reviewing" ||
+    value === "changes_requested" ||
+    value === "blocked" ||
+    value === "ready_to_merge" ||
+    value === "merged" ||
+    value === "closed"
+    ? value
+    : undefined;
+}
+
+function parseMutablePullRequestStatus(value: unknown): "draft" | "merged" | "closed" | undefined {
+  return value === "draft" || value === "merged" || value === "closed" ? value : undefined;
+}
+
+function parsePullRequestOrigin(value: unknown): PullRequestOrigin | undefined {
+  return value === "helix" || value === "external" ? value : undefined;
+}
+
+function optionalPositiveInteger(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function continuationInstruction(commentBody: string, command: string): string | undefined {

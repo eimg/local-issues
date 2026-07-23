@@ -12,6 +12,7 @@ const DEFAULTS: AppConfig = {
   commentTrigger: DEFAULT_COMMENT_TRIGGER,
   webhookEnabled: false,
   baseUrl: "http://127.0.0.1:8320",
+  defaultRepositoryPath: "",
 };
 
 export function loadConfig(db: Database.Database): AppConfig {
@@ -23,6 +24,7 @@ export function loadConfig(db: Database.Database): AppConfig {
     commentTrigger: stored.commentTrigger ?? DEFAULTS.commentTrigger,
     webhookEnabled: stored.webhookEnabled !== undefined ? stored.webhookEnabled === "true" : DEFAULTS.webhookEnabled,
     baseUrl: stored.baseUrl ?? DEFAULTS.baseUrl,
+    defaultRepositoryPath: stored.defaultRepositoryPath ?? DEFAULTS.defaultRepositoryPath,
   };
 }
 

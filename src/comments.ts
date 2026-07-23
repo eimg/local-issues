@@ -121,6 +121,17 @@ export function formatHelixCloseComment(payload: HelixRunPayload): string {
   ].join("\n");
 }
 
+export function formatHelixPullRequestComment(payload: HelixRunPayload): string {
+  const finished = payload.run.finishedAt
+    ? new Date(payload.run.finishedAt).toISOString()
+    : "unknown";
+  return [
+    "Implementation completed — a local PR is awaiting independent review.",
+    `Run: ${shortRunId(payload.run.id)}`,
+    `Finished: ${finished}`,
+  ].join("\n");
+}
+
 export function addHelixStartComment(
   db: Database.Database,
   issueId: number,
@@ -142,5 +153,17 @@ export function addHelixCompletionComment(
     author: "helix",
     source: "helix.webhook",
     body: formatHelixCloseComment(payload),
+  });
+}
+
+export function addHelixPullRequestComment(
+  db: Database.Database,
+  issueId: number,
+  payload: HelixRunPayload
+): IssueComment {
+  return createComment(db, issueId, {
+    author: "helix",
+    source: "helix.webhook",
+    body: formatHelixPullRequestComment(payload),
   });
 }

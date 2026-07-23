@@ -77,6 +77,49 @@ function migrate(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_helix_runs_issue ON helix_runs(issue_id, finished_at DESC);
+
+    CREATE TABLE IF NOT EXISTS pull_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      issue_id INTEGER,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      repository_path TEXT NOT NULL,
+      base_branch TEXT NOT NULL,
+      base_sha TEXT NOT NULL,
+      head_branch TEXT NOT NULL,
+      head_sha TEXT NOT NULL,
+      author TEXT NOT NULL DEFAULT 'unknown',
+      origin TEXT NOT NULL CHECK(origin IN ('helix', 'external')),
+      status TEXT NOT NULL DEFAULT 'draft'
+        CHECK(status IN ('draft', 'reviewing', 'changes_requested', 'blocked', 'ready_to_merge', 'merged', 'closed')),
+      active_review_run_id TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      merged_at INTEGER,
+      merge_commit_sha TEXT,
+      FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pull_requests_status ON pull_requests(status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_pull_requests_issue ON pull_requests(issue_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS pull_request_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pull_request_id INTEGER NOT NULL,
+      review_run_id TEXT NOT NULL UNIQUE,
+      head_sha TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('running', 'completed', 'error')),
+      decision TEXT CHECK(decision IN ('ready_to_merge', 'changes_requested', 'blocked')),
+      summary TEXT NOT NULL DEFAULT '',
+      findings_json TEXT NOT NULL DEFAULT '[]',
+      checks_json TEXT NOT NULL DEFAULT '[]',
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER,
+      FOREIGN KEY (pull_request_id) REFERENCES pull_requests(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pull_request_reviews_pr
+      ON pull_request_reviews(pull_request_id, started_at DESC);
   `);
 
   migrateIssuesStatusConstraint(db);

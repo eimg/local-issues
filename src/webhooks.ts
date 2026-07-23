@@ -10,8 +10,11 @@ import type {
   ContinuationWebhookPayload,
   Issue,
   OutboundWebhookPayload,
+  PullRequest,
+  PullRequestReviewWebhookPayload,
   WebhookDelivery,
 } from "./types.js";
+import { getIssue } from "./issues.js";
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [0, 500, 1500];
@@ -103,6 +106,81 @@ export class WebhookDispatcher {
     return this.send(url, issue.id, payload, reason, config.baseUrl);
   }
 
+  async dispatchPullRequestReview(
+    pullRequest: PullRequest,
+  ): Promise<{ success: boolean; statusCode: number | null; error: string | null; response?: unknown }> {
+    const config = loadConfig(this.db);
+    if (!config.webhookEnabled) {
+      return { success: false, statusCode: null, error: "Webhooks are disabled" };
+    }
+    const url = pullRequestReviewUrl(config.webhookUrl);
+    if (!url) {
+      return {
+        success: false,
+        statusCode: null,
+        error: "Webhook URL must end in /runs so the Helix PR-review endpoint can be derived",
+      };
+    }
+
+    const issue = pullRequest.issueId
+      ? getIssue(this.db, config.baseUrl, pullRequest.issueId)
+      : undefined;
+    const payload: PullRequestReviewWebhookPayload = {
+      pullRequest: {
+        id: pullRequest.id,
+        title: pullRequest.title,
+        description: pullRequest.description,
+        repositoryPath: pullRequest.repositoryPath,
+        baseBranch: pullRequest.baseBranch,
+        baseSha: pullRequest.baseSha,
+        headBranch: pullRequest.headBranch,
+        headSha: pullRequest.headSha,
+        author: pullRequest.author,
+        origin: pullRequest.origin,
+        issue: issue
+          ? { id: issue.id, title: issue.title, body: issue.body }
+          : undefined,
+      },
+      callback: {
+        trackerUrl: config.baseUrl.replace(/\/$/, ""),
+        pullRequestId: pullRequest.id,
+      },
+      externalEventId: `pull-request:${pullRequest.id}:head:${pullRequest.headSha}`,
+    };
+
+    try {
+      const res = await this.fetchFn(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Issues-Reason": "pull_request.review_requested",
+          "X-Issues-Pull-Request-Id": String(pullRequest.id),
+          "X-Issues-Source": config.baseUrl.replace(/\/$/, ""),
+        },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.text();
+      let response: unknown;
+      try {
+        response = body ? JSON.parse(body) : undefined;
+      } catch {
+        response = body;
+      }
+      return {
+        success: res.ok,
+        statusCode: res.status,
+        error: res.ok ? null : `HTTP ${res.status}`,
+        response,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        statusCode: null,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
   async send(
     url: string,
     issueId: number,
@@ -170,6 +248,12 @@ function continuationUrl(webhookUrl: string, parentRunId: string): string | unde
   const normalized = webhookUrl.trim().replace(/\/+$/, "");
   if (!normalized.endsWith("/runs")) return undefined;
   return `${normalized}/${encodeURIComponent(parentRunId)}/continuations`;
+}
+
+function pullRequestReviewUrl(webhookUrl: string): string | undefined {
+  const normalized = webhookUrl.trim().replace(/\/+$/, "");
+  if (!normalized.endsWith("/runs")) return undefined;
+  return `${normalized.slice(0, -"/runs".length)}/pr-reviews`;
 }
 
 function sleep(ms: number): Promise<void> {

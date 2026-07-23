@@ -32,6 +32,10 @@
       </div>
     </div>
     <div class="header-actions">
+      <div class="view-switcher" role="navigation" aria-label="Workspace">
+        <button id="issues-view-btn" class="view-switch active" type="button">Issues</button>
+        <button id="prs-view-btn" class="view-switch" type="button">Pull requests</button>
+      </div>
       <button id="settings-btn" class="btn btn-ghost" type="button">
         <svg class="icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
           <path
@@ -51,10 +55,11 @@
         </svg>
         New issue
       </button>
+      <button id="new-pr-btn" class="btn btn-primary hidden" type="button">New local PR</button>
     </div>
   </header>
 
-  <main class="layout">
+  <main id="issues-view" class="layout">
     <section class="panel issues-panel" aria-label="Issue list">
       <div class="panel-header issues-panel-header">
         <div class="panel-title-row">
@@ -191,6 +196,82 @@
     </section>
   </main>
 
+  <main id="prs-view" class="pr-layout hidden">
+    <section class="panel pr-list-panel" aria-label="Pull request list">
+      <div class="panel-header pr-list-header">
+        <div>
+          <h2>Local pull requests</h2>
+          <p>Git-backed changes awaiting human merge</p>
+        </div>
+        <button id="refresh-prs-btn" class="btn btn-ghost btn-sm" type="button">Refresh</button>
+      </div>
+      <div class="filters pr-filters" role="group" aria-label="Filter pull requests">
+        <button class="pr-filter-btn filter-btn active" data-pr-status="" type="button">All</button>
+        <button class="pr-filter-btn filter-btn" data-pr-status="reviewing" type="button">Reviewing</button>
+        <button class="pr-filter-btn filter-btn" data-pr-status="changes_requested" type="button">Changes</button>
+        <button class="pr-filter-btn filter-btn" data-pr-status="ready_to_merge" type="button">Ready</button>
+      </div>
+      <ul id="pr-list" class="issue-list pr-list"></ul>
+    </section>
+
+    <section class="panel pr-detail-panel" aria-label="Pull request detail">
+      <div id="pr-empty-state" class="empty-state">
+        <p class="empty-title">No pull request selected</p>
+        <p class="empty-hint">Select a local PR to inspect its exact SHA, findings, checks, and diff.</p>
+      </div>
+      <article id="pr-detail" class="pr-detail hidden">
+        <div class="pr-detail-head">
+          <div>
+            <span id="pr-number" class="issue-number"></span>
+            <h2 id="pr-title"></h2>
+          </div>
+          <div class="detail-actions">
+            <button id="request-review-btn" class="btn btn-primary" type="button">Request review</button>
+            <button id="mark-merged-btn" class="btn btn-secondary hidden" type="button">Mark merged</button>
+          </div>
+        </div>
+        <div id="pr-status-banner" class="pr-status-banner"></div>
+        <p id="pr-description" class="pr-description"></p>
+        <dl class="pr-identity">
+          <div><dt>Repository</dt><dd id="pr-repository"></dd></div>
+          <div><dt>Branches</dt><dd id="pr-branches"></dd></div>
+          <div><dt>Base SHA</dt><dd><code id="pr-base-sha"></code></dd></div>
+          <div><dt>Head SHA</dt><dd><code id="pr-head-sha"></code></dd></div>
+          <div><dt>Origin</dt><dd id="pr-origin"></dd></div>
+          <div><dt>Linked issue</dt><dd id="pr-issue"></dd></div>
+        </dl>
+
+        <section class="pr-review-section">
+          <h3>Latest review</h3>
+          <div id="pr-review-summary" class="review-summary muted-card">No review has run for this head SHA.</div>
+          <div class="review-columns">
+            <div>
+              <h4>Findings</h4>
+              <ul id="pr-findings" class="review-list"></ul>
+            </div>
+            <div>
+              <h4>Checks</h4>
+              <ul id="pr-checks" class="review-list"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="pr-diff-section">
+          <div class="section-heading">
+            <h3>Diff</h3>
+            <button id="refresh-diff-btn" class="btn btn-ghost btn-sm" type="button">Reload</button>
+          </div>
+          <pre id="pr-diff" class="pr-diff">Loading…</pre>
+        </section>
+
+        <details class="review-history">
+          <summary>Review history</summary>
+          <ul id="pr-review-history" class="review-list"></ul>
+        </details>
+      </article>
+    </section>
+  </main>
+
   <dialog id="new-issue-dialog" class="dialog">
     <form id="new-issue-form" method="dialog">
       <h2>New issue</h2>
@@ -208,7 +289,7 @@
         <input name="labels" class="input" placeholder="trigger, bug" autocomplete="off" />
       </label>
       <div class="dialog-actions">
-        <button class="btn btn-ghost" value="cancel" type="submit">Cancel</button>
+        <button class="btn btn-ghost" data-close-dialog type="button">Cancel</button>
         <button class="btn btn-primary" value="create" type="submit">Create issue</button>
       </div>
     </form>
@@ -230,13 +311,91 @@
         <span class="field-label">Continuation comment command</span>
         <input name="commentTrigger" class="input" placeholder="/helix" autocomplete="off" />
       </label>
+      <label class="field">
+        <span class="field-label">Default repository</span>
+        <span class="input-action-row">
+          <input name="defaultRepositoryPath" class="input" placeholder="/absolute/path/to/repository" autocomplete="off" />
+          <button id="browse-default-repository-btn" class="btn btn-secondary" type="button">Browse</button>
+        </span>
+        <span class="field-help">Used to prefill new local pull requests.</span>
+      </label>
       <label class="checkbox-row">
         <input name="webhookEnabled" type="checkbox" />
         <span>Enable webhooks</span>
       </label>
       <div class="dialog-actions">
-        <button class="btn btn-ghost" value="cancel" type="submit">Cancel</button>
+        <button class="btn btn-ghost" data-close-dialog type="button">Cancel</button>
         <button class="btn btn-primary" value="save" type="submit">Save settings</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="new-pr-dialog" class="dialog dialog-wide">
+    <form id="new-pr-form" method="dialog">
+      <h2>New local pull request</h2>
+      <p class="dialog-subtitle">Register an existing local Git branch for independent Helix review.</p>
+      <div class="form-grid">
+        <label class="field field-span-2">
+          <span class="field-label">Title</span>
+          <input name="title" class="input" required autocomplete="off" />
+        </label>
+        <label class="field field-span-2">
+          <span class="field-label">Description</span>
+          <textarea name="description" class="input" rows="3"></textarea>
+        </label>
+        <label class="field field-span-2">
+          <span class="field-label">Repository path</span>
+          <span class="input-action-row">
+            <input name="repositoryPath" class="input" required placeholder="/absolute/path/to/repository" autocomplete="off" />
+            <button id="browse-pr-repository-btn" class="btn btn-secondary" type="button">Browse</button>
+          </span>
+        </label>
+        <label class="field">
+          <span class="field-label">Base branch</span>
+          <input name="baseBranch" class="input" value="main" required autocomplete="off" />
+        </label>
+        <label class="field">
+          <span class="field-label">Base SHA</span>
+          <input name="baseSha" class="input" required autocomplete="off" />
+        </label>
+        <label class="field">
+          <span class="field-label">Head branch</span>
+          <input name="headBranch" class="input" required autocomplete="off" />
+        </label>
+        <label class="field">
+          <span class="field-label">Head SHA</span>
+          <input name="headSha" class="input" required autocomplete="off" />
+        </label>
+        <label class="field">
+          <span class="field-label">Linked issue ID (optional)</span>
+          <input name="issueId" class="input" type="number" min="1" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span class="field-label">Author</span>
+          <input name="author" class="input" value="human" autocomplete="off" />
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" data-close-dialog type="button">Cancel</button>
+        <button class="btn btn-primary" value="create" type="submit">Create local PR</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="repository-picker-dialog" class="dialog dialog-wide">
+    <form id="repository-picker-form">
+      <h2>Choose repository</h2>
+      <p class="dialog-subtitle">Browse folders visible to this local Acme Issues server.</p>
+      <div class="repository-picker-location">
+        <button id="repository-picker-up" class="btn btn-secondary" type="button" aria-label="Parent folder">Up</button>
+        <input id="repository-picker-path" class="input" aria-label="Current folder" autocomplete="off" />
+        <button class="btn btn-secondary" type="submit">Go</button>
+      </div>
+      <div id="repository-picker-list" class="repository-picker-list" aria-live="polite"></div>
+      <p id="repository-picker-status" class="field-help"></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" data-close-dialog type="button">Cancel</button>
+        <button id="repository-picker-select" class="btn btn-primary" type="button" disabled>Use this repository</button>
       </div>
     </form>
   </dialog>
