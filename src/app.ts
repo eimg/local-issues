@@ -52,6 +52,9 @@ const bundledReactDir = join(dirname(fileURLToPath(import.meta.url)), "react");
 const reactDir = existsSync(bundledReactDir)
   ? bundledReactDir
   : resolve(process.cwd(), "dist/react");
+const reactIndex = existsSync(join(reactDir, "index.html"))
+  ? join(reactDir, "index.html")
+  : resolve(process.cwd(), "web/index.html");
 
 export interface CreateAppOptions {
   db: Database.Database;
@@ -64,9 +67,9 @@ export function createApp(opts: CreateAppOptions): Express {
   const app = express();
 
   app.use(express.json());
-  app.use(express.static(publicDir));
-  app.use("/react", express.static(reactDir));
-  app.get("/react", (_req, res) => res.redirect("/react/"));
+  app.use(express.static(publicDir, { index: false }));
+  app.use(express.static(reactDir, { index: false }));
+  app.get(["/react", "/react/"], (_req, res) => res.redirect("/"));
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
@@ -583,8 +586,11 @@ export function createApp(opts: CreateAppOptions): Express {
     res.status(200).json({ ok: true, issue, comment });
   });
 
-  app.get("/", (_req, res) => {
+  app.get("/legacy", (_req, res) => {
     res.sendFile(join(publicDir, "index.html"));
+  });
+  app.get("/", (_req, res) => {
+    res.sendFile(reactIndex);
   });
 
   return app;

@@ -559,20 +559,23 @@ describe("acme-issues API", () => {
     assert.equal(closed.body.status, "closed");
   });
 
-  it("serves the pull request management interface", async () => {
+  it("serves React as the primary interface with the legacy interface available", async () => {
     const page = await request(app).get("/").expect(200);
-    assert.match(page.text, /Pull requests/);
-    assert.match(page.text, /id="pr-list"/);
-    assert.match(page.text, /id="request-review-btn"/);
-    assert.match(page.text, /id="browse-default-repository-btn"/);
-    assert.match(page.text, /id="repository-picker-dialog"/);
-    assert.match(page.text, /data-close-dialog type="button">Cancel/);
+    assert.match(page.text, /id="root"/);
+
+    const legacy = await request(app).get("/legacy").expect(200);
+    assert.match(legacy.text, /Pull requests/);
+    assert.match(legacy.text, /id="pr-list"/);
+    assert.match(legacy.text, /id="request-review-btn"/);
+    assert.match(legacy.text, /id="browse-default-repository-btn"/);
+    assert.match(legacy.text, /id="repository-picker-dialog"/);
+    assert.match(legacy.text, /data-close-dialog type="button">Cancel/);
     const script = await request(app).get("/app.js").expect(200);
     assert.match(script.text, /currentHeadReviewed/);
     assert.match(script.text, /Review again/);
     assert.match(script.text, /requestReviewBtn\.classList\.toggle\("hidden", reviewClosed\)/);
 
-    const reactPreview = await request(app).get("/react").expect(301);
-    assert.equal(reactPreview.headers.location, "/react/");
+    const reactPreview = await request(app).get("/react").expect(302);
+    assert.equal(reactPreview.headers.location, "/");
   });
 });

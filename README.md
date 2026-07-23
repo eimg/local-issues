@@ -250,10 +250,10 @@ Pull-request status values: `draft`, `reviewing`, `changes_requested`, `blocked`
 
 ## Development
 
-The React and TanStack Query migration preview is served at `/react/` after
-`npm run build`. The existing interface remains authoritative at `/` while
-creation, settings, repository browsing, and the remaining mutation flows are
-ported and checked for parity.
+The React and TanStack Query interface is served at `/`. The previous
+dependency-free interface remains available at `/legacy` for comparison after
+`npm run build`. The development command rebuilds the React bundle before
+starting the local server.
 
 ```bash
 npm run dev -- --port 8320
