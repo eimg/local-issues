@@ -124,11 +124,9 @@ function Header({
         <button className="btn btn-ghost" onClick={onSettings}>
           <Icon name="settings" /> Settings
         </button>
-        {view === "issues" && (
-          <button className="btn btn-primary" onClick={onNewIssue}>
-            <Icon name="plus" /> New issue
-          </button>
-        )}
+        <button className="btn btn-primary" onClick={onNewIssue}>
+          <Icon name="plus" /> New issue
+        </button>
       </div>
     </header>
   );
