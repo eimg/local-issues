@@ -31,6 +31,7 @@ export interface AppConfig {
   commentTrigger: string;
   webhookEnabled: boolean;
   baseUrl: string;
+  defaultRepositoryPath: string;
 }
 
 export interface WebhookPayload {
@@ -50,6 +51,108 @@ export interface ContinuationWebhookPayload {
 }
 
 export type OutboundWebhookPayload = WebhookPayload | ContinuationWebhookPayload;
+
+export type PullRequestOrigin = "helix" | "external";
+export type PullRequestStatus =
+  | "draft"
+  | "reviewing"
+  | "changes_requested"
+  | "blocked"
+  | "ready_to_merge"
+  | "merged"
+  | "closed";
+
+export type PullRequestDecision = "ready_to_merge" | "changes_requested" | "blocked";
+export type ReviewFindingSeverity = "blocking" | "warning" | "note";
+
+export interface PullRequest {
+  id: number;
+  issueId?: number;
+  title: string;
+  description: string;
+  repositoryPath: string;
+  baseBranch: string;
+  baseSha: string;
+  headBranch: string;
+  headSha: string;
+  author: string;
+  origin: PullRequestOrigin;
+  status: PullRequestStatus;
+  activeReviewRunId?: string;
+  createdAt: number;
+  updatedAt: number;
+  mergedAt?: number;
+  mergeCommitSha?: string;
+}
+
+export interface PullRequestReviewFinding {
+  severity: ReviewFindingSeverity;
+  title: string;
+  details: string;
+}
+
+export interface PullRequestReviewCheck {
+  name: string;
+  status: "passed" | "failed" | "blocked";
+  summary: string;
+}
+
+export interface PullRequestReview {
+  id: number;
+  pullRequestId: number;
+  reviewRunId: string;
+  headSha: string;
+  status: "running" | "completed" | "error";
+  decision?: PullRequestDecision;
+  summary: string;
+  findings: PullRequestReviewFinding[];
+  checks: PullRequestReviewCheck[];
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export interface PullRequestReviewWebhookPayload {
+  pullRequest: {
+    id: number;
+    title: string;
+    description: string;
+    repositoryPath: string;
+    baseBranch: string;
+    baseSha: string;
+    headBranch: string;
+    headSha: string;
+    author: string;
+    origin: PullRequestOrigin;
+    issue?: {
+      id: number;
+      title: string;
+      body: string;
+    };
+  };
+  callback: {
+    trackerUrl: string;
+    pullRequestId: number;
+  };
+  externalEventId: string;
+}
+
+export interface HelixPullRequestReviewPayload {
+  event: "pr.review.started" | "pr.review.completed";
+  review: {
+    id: string;
+    status: "running" | "completed" | "error";
+    headSha: string;
+    startedAt: number;
+    finishedAt?: number;
+    decision?: PullRequestDecision;
+    summary?: string;
+    findings?: PullRequestReviewFinding[];
+    checks?: PullRequestReviewCheck[];
+  };
+  pullRequest: {
+    id: number;
+  };
+}
 
 export interface HelixRunPayload {
   event: "run.started" | "run.completed";

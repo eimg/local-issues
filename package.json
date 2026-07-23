@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "Experimental local issue tracker — companion to Helix, with outbound webhooks",
+  "description": "Experimental local issue and pull-request manager for Helix",
   "license": "MIT",
   "author": "Ei Maung",
   "keywords": [

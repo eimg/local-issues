@@ -11,6 +11,13 @@ const state = {
   statusFilter: "",
   labelFilter: "",
   watchTimer: null,
+  pullRequests: [],
+  selectedPrId: null,
+  selectedPrRenderKey: null,
+  prStatusFilter: "",
+  prWatchTimer: null,
+  repositoryPickerTarget: null,
+  repositoryBrowse: null,
 };
 
 const WATCH_INTERVAL_MS = 2000;
@@ -46,7 +53,46 @@ const els = {
   prevPageBtn: document.getElementById("prev-page-btn"),
   nextPageBtn: document.getElementById("next-page-btn"),
   pageInfo: document.getElementById("page-info"),
-  filterBtns: [...document.querySelectorAll(".filter-btn")],
+  filterBtns: [...document.querySelectorAll("[data-status]")],
+  issuesView: document.getElementById("issues-view"),
+  prsView: document.getElementById("prs-view"),
+  issuesViewBtn: document.getElementById("issues-view-btn"),
+  prsViewBtn: document.getElementById("prs-view-btn"),
+  newPrBtn: document.getElementById("new-pr-btn"),
+  refreshPrsBtn: document.getElementById("refresh-prs-btn"),
+  prList: document.getElementById("pr-list"),
+  prEmptyState: document.getElementById("pr-empty-state"),
+  prDetail: document.getElementById("pr-detail"),
+  prNumber: document.getElementById("pr-number"),
+  prTitle: document.getElementById("pr-title"),
+  prDescription: document.getElementById("pr-description"),
+  prStatusBanner: document.getElementById("pr-status-banner"),
+  prRepository: document.getElementById("pr-repository"),
+  prBranches: document.getElementById("pr-branches"),
+  prBaseSha: document.getElementById("pr-base-sha"),
+  prHeadSha: document.getElementById("pr-head-sha"),
+  prOrigin: document.getElementById("pr-origin"),
+  prIssue: document.getElementById("pr-issue"),
+  prReviewSummary: document.getElementById("pr-review-summary"),
+  prFindings: document.getElementById("pr-findings"),
+  prChecks: document.getElementById("pr-checks"),
+  prDiff: document.getElementById("pr-diff"),
+  prReviewHistory: document.getElementById("pr-review-history"),
+  requestReviewBtn: document.getElementById("request-review-btn"),
+  markMergedBtn: document.getElementById("mark-merged-btn"),
+  refreshDiffBtn: document.getElementById("refresh-diff-btn"),
+  prFilterBtns: [...document.querySelectorAll(".pr-filter-btn")],
+  newPrDialog: document.getElementById("new-pr-dialog"),
+  newPrForm: document.getElementById("new-pr-form"),
+  browseDefaultRepositoryBtn: document.getElementById("browse-default-repository-btn"),
+  browsePrRepositoryBtn: document.getElementById("browse-pr-repository-btn"),
+  repositoryPickerDialog: document.getElementById("repository-picker-dialog"),
+  repositoryPickerForm: document.getElementById("repository-picker-form"),
+  repositoryPickerPath: document.getElementById("repository-picker-path"),
+  repositoryPickerUp: document.getElementById("repository-picker-up"),
+  repositoryPickerList: document.getElementById("repository-picker-list"),
+  repositoryPickerStatus: document.getElementById("repository-picker-status"),
+  repositoryPickerSelect: document.getElementById("repository-picker-select"),
 };
 
 async function api(path, options = {}) {
@@ -101,6 +147,10 @@ function formatStatus(status) {
 
 function statusToggleLabel(status) {
   return status === "closed" ? "Reopen" : "Close";
+}
+
+function formatPrStatus(status) {
+  return status.replaceAll("_", " ");
 }
 
 function buildIssuesQuery() {
@@ -527,11 +577,336 @@ async function deleteSelectedIssue() {
   await loadIssues();
 }
 
+function switchView(view) {
+  const showPullRequests = view === "pull-requests";
+  els.issuesView.classList.toggle("hidden", showPullRequests);
+  els.prsView.classList.toggle("hidden", !showPullRequests);
+  els.issuesViewBtn.classList.toggle("active", !showPullRequests);
+  els.prsViewBtn.classList.toggle("active", showPullRequests);
+  els.newIssueBtn.classList.toggle("hidden", showPullRequests);
+  els.newPrBtn.classList.toggle("hidden", !showPullRequests);
+  if (showPullRequests) void loadPullRequests();
+}
+
+async function loadPullRequests() {
+  const query = state.prStatusFilter
+    ? `?status=${encodeURIComponent(state.prStatusFilter)}`
+    : "";
+  state.pullRequests = await api(`/api/pull-requests${query}`);
+  renderPullRequestList();
+  if (state.selectedPrId && state.pullRequests.some((pr) => pr.id === state.selectedPrId)) {
+    await selectPullRequest(state.selectedPrId, { preserveList: true });
+  }
+}
+
+function renderPullRequestList() {
+  if (!state.pullRequests.length) {
+    els.prList.innerHTML = '<li class="issue-empty">No local pull requests.</li>';
+    return;
+  }
+  els.prList.innerHTML = state.pullRequests.map((pr) => `
+    <li class="issue-item pr-item ${pr.id === state.selectedPrId ? "active" : ""}" data-pr-id="${pr.id}">
+      <div class="pr-item-top">
+        <h3>#${pr.id} ${escapeHtml(pr.title)}</h3>
+        <span class="status pr-status ${escapeHtml(pr.status)}">${escapeHtml(formatPrStatus(pr.status))}</span>
+      </div>
+      <div class="issue-meta">${escapeHtml(pr.headBranch)} → ${escapeHtml(pr.baseBranch)}</div>
+      <div class="issue-meta"><code>${escapeHtml(pr.headSha.slice(0, 10))}</code> · ${escapeHtml(pr.origin)}</div>
+    </li>
+  `).join("");
+  for (const item of els.prList.querySelectorAll("[data-pr-id]")) {
+    item.addEventListener("click", () => void selectPullRequest(Number(item.dataset.prId)));
+  }
+}
+
+async function selectPullRequest(id, opts = {}) {
+  state.selectedPrId = id;
+  const pr = await api(`/api/pull-requests/${id}`);
+  els.prEmptyState.classList.add("hidden");
+  els.prDetail.classList.remove("hidden");
+  renderPullRequest(pr);
+  if (!opts.preserveList) renderPullRequestList();
+  void loadPullRequestDiff(id);
+}
+
+function renderPullRequest(pr) {
+  state.selectedPrRenderKey = pullRequestRenderKey(pr);
+  els.prNumber.textContent = `Local PR #${pr.id}`;
+  els.prTitle.textContent = pr.title;
+  els.prDescription.textContent = pr.description || "No description.";
+  els.prStatusBanner.className = `pr-status-banner ${pr.status}`;
+  els.prStatusBanner.textContent = formatPrStatus(pr.status);
+  els.prRepository.textContent = pr.repositoryPath;
+  els.prBranches.textContent = `${pr.headBranch} → ${pr.baseBranch}`;
+  els.prBaseSha.textContent = pr.baseSha;
+  els.prHeadSha.textContent = pr.headSha;
+  els.prOrigin.textContent = `${pr.origin} · ${pr.author}`;
+  els.prIssue.innerHTML = pr.issueId
+    ? `<a href="/?issue=${pr.issueId}">Issue #${pr.issueId}</a>`
+    : "None";
+  const reviews = pr.reviews || [];
+  const latest = reviews.find((review) => review.headSha === pr.headSha);
+  const currentHeadReviewed = reviews.some(
+    (review) => review.headSha === pr.headSha && review.status === "completed",
+  );
+  const reviewClosed = pr.status === "merged" || pr.status === "closed";
+  els.requestReviewBtn.classList.toggle("hidden", reviewClosed);
+  els.requestReviewBtn.disabled = pr.status === "reviewing";
+  els.requestReviewBtn.textContent = pr.status === "reviewing"
+    ? "Review running…"
+    : currentHeadReviewed
+      ? "Review again"
+      : "Request review";
+  els.requestReviewBtn.classList.toggle("btn-primary", !currentHeadReviewed);
+  els.requestReviewBtn.classList.toggle("btn-secondary", currentHeadReviewed);
+  els.markMergedBtn.classList.toggle("hidden", pr.status !== "ready_to_merge");
+
+  if (!latest) {
+    els.prReviewSummary.textContent = "No review has run for this head SHA.";
+    els.prFindings.innerHTML = '<li class="review-empty">No findings.</li>';
+    els.prChecks.innerHTML = '<li class="review-empty">No checks.</li>';
+  } else {
+    els.prReviewSummary.textContent = latest.summary || formatPrStatus(latest.status);
+    els.prFindings.innerHTML = renderFindings(latest.findings);
+    els.prChecks.innerHTML = renderChecks(latest.checks);
+  }
+  els.prReviewHistory.innerHTML = reviews.length
+    ? reviews.map((review) => `
+        <li class="review-history-item">
+          <strong>${escapeHtml(review.decision ? formatPrStatus(review.decision) : review.status)}</strong>
+          <code>${escapeHtml(review.headSha.slice(0, 10))}</code>
+          <span>${escapeHtml(formatTime(review.finishedAt || review.startedAt))}</span>
+        </li>
+      `).join("")
+    : '<li class="review-empty">No review history.</li>';
+}
+
+function renderFindings(findings = []) {
+  if (!findings.length) return '<li class="review-empty">No findings.</li>';
+  return findings.map((finding) => `
+    <li class="review-item finding-${escapeHtml(finding.severity)}">
+      <div><span class="review-badge">${escapeHtml(finding.severity)}</span> <strong>${escapeHtml(finding.title)}</strong></div>
+      <p>${escapeHtml(finding.details)}</p>
+    </li>
+  `).join("");
+}
+
+function renderChecks(checks = []) {
+  if (!checks.length) return '<li class="review-empty">No checks reported.</li>';
+  return checks.map((check) => `
+    <li class="review-item check-${escapeHtml(check.status)}">
+      <div><span class="review-badge">${escapeHtml(check.status)}</span> <strong>${escapeHtml(check.name)}</strong></div>
+      <p>${escapeHtml(check.summary)}</p>
+    </li>
+  `).join("");
+}
+
+async function loadPullRequestDiff(id) {
+  els.prDiff.textContent = "Loading…";
+  try {
+    const result = await api(`/api/pull-requests/${id}/diff`);
+    els.prDiff.textContent = result.diff || "(no diff)";
+  } catch (err) {
+    els.prDiff.textContent = `Unable to load diff: ${err.message}`;
+  }
+}
+
+async function requestPullRequestReview() {
+  if (!state.selectedPrId) return;
+  try {
+    await api(`/api/pull-requests/${state.selectedPrId}/review`, { method: "POST" });
+    showToast("Helix PR review started");
+    startWatchingPullRequest(state.selectedPrId);
+    await selectPullRequest(state.selectedPrId);
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
+function startWatchingPullRequest(id) {
+  stopWatchingPullRequest();
+  const startedAt = Date.now();
+  const tick = async () => {
+    if (Date.now() - startedAt > WATCH_TIMEOUT_MS || state.selectedPrId !== id) {
+      stopWatchingPullRequest();
+      return;
+    }
+    try {
+      const pr = await api(`/api/pull-requests/${id}`);
+      if (pullRequestRenderKey(pr) !== state.selectedPrRenderKey) {
+        renderPullRequest(pr);
+      }
+      if (pr.status !== "reviewing") {
+        stopWatchingPullRequest();
+        await loadPullRequests();
+        showToast(`PR review: ${formatPrStatus(pr.status)}`);
+        return;
+      }
+    } catch {
+      // Ignore transient local polling failures.
+    }
+    if (state.selectedPrId === id) {
+      state.prWatchTimer = setTimeout(() => void tick(), WATCH_INTERVAL_MS);
+    }
+  };
+  state.prWatchTimer = setTimeout(() => void tick(), WATCH_INTERVAL_MS);
+}
+
+function stopWatchingPullRequest() {
+  if (state.prWatchTimer) {
+    clearInterval(state.prWatchTimer);
+    state.prWatchTimer = null;
+  }
+}
+
+function pullRequestRenderKey(pr) {
+  return JSON.stringify({
+    status: pr.status,
+    activeReviewRunId: pr.activeReviewRunId,
+    updatedAt: pr.updatedAt,
+    reviews: pr.reviews,
+  });
+}
+
+async function markPullRequestMerged() {
+  if (!state.selectedPrId) return;
+  if (!confirm("Confirm that you manually merged the reviewed head SHA into the base branch.")) return;
+  const mergeCommitSha = prompt("Merge commit SHA (optional):", "") || undefined;
+  try {
+    await api(`/api/pull-requests/${state.selectedPrId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "merged", mergeCommitSha }),
+    });
+    showToast("Local PR recorded as merged");
+    await loadPullRequests();
+    await selectPullRequest(state.selectedPrId);
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
 function resetToFirstPage() {
   state.offset = 0;
 }
 
+async function openRepositoryPicker(targetInput) {
+  state.repositoryPickerTarget = targetInput;
+  els.repositoryPickerDialog.showModal();
+  await loadRepositoryDirectory(
+    targetInput.value || state.config?.defaultRepositoryPath || "",
+  );
+}
+
+async function loadRepositoryDirectory(path) {
+  els.repositoryPickerList.replaceChildren();
+  els.repositoryPickerStatus.textContent = "Loading folders…";
+  els.repositoryPickerSelect.disabled = true;
+  try {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    const browse = await api(`/api/repositories/browse${query}`);
+    state.repositoryBrowse = browse;
+    els.repositoryPickerPath.value = browse.path;
+    els.repositoryPickerUp.disabled = !browse.parent;
+    els.repositoryPickerSelect.disabled = !browse.isGitRepository;
+    els.repositoryPickerStatus.textContent = browse.isGitRepository
+      ? "This folder is a Git repository."
+      : "Choose a Git repository folder.";
+
+    if (!browse.directories.length) {
+      const empty = document.createElement("p");
+      empty.className = "repository-picker-empty";
+      empty.textContent = "No subfolders";
+      els.repositoryPickerList.append(empty);
+      return;
+    }
+
+    for (const directory of browse.directories) {
+      const row = document.createElement("div");
+      row.className = "repository-picker-item";
+
+      const openButton = document.createElement("button");
+      openButton.className = "repository-picker-folder";
+      openButton.type = "button";
+      openButton.textContent = directory.name;
+      openButton.addEventListener("click", () => void loadRepositoryDirectory(directory.path));
+      row.append(openButton);
+
+      if (directory.isGitRepository) {
+        const badge = document.createElement("span");
+        badge.className = "repository-picker-badge";
+        badge.textContent = "Git";
+        row.append(badge);
+
+        const useButton = document.createElement("button");
+        useButton.className = "btn btn-secondary btn-sm";
+        useButton.type = "button";
+        useButton.textContent = "Use";
+        useButton.addEventListener("click", () => chooseRepository(directory.path));
+        row.append(useButton);
+      }
+      els.repositoryPickerList.append(row);
+    }
+  } catch (err) {
+    state.repositoryBrowse = null;
+    els.repositoryPickerStatus.textContent = err.message;
+  }
+}
+
+function chooseRepository(path) {
+  if (state.repositoryPickerTarget) {
+    state.repositoryPickerTarget.value = path;
+    state.repositoryPickerTarget.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  els.repositoryPickerDialog.close();
+}
+
 els.newIssueBtn.addEventListener("click", () => els.newIssueDialog.showModal());
+els.newPrBtn.addEventListener("click", () => {
+  if (!els.newPrForm.repositoryPath.value) {
+    els.newPrForm.repositoryPath.value = state.config?.defaultRepositoryPath || "";
+  }
+  els.newPrDialog.showModal();
+});
+els.issuesViewBtn.addEventListener("click", () => switchView("issues"));
+els.prsViewBtn.addEventListener("click", () => switchView("pull-requests"));
+els.refreshPrsBtn.addEventListener("click", () => void loadPullRequests());
+els.requestReviewBtn.addEventListener("click", () => void requestPullRequestReview());
+els.markMergedBtn.addEventListener("click", () => void markPullRequestMerged());
+els.refreshDiffBtn.addEventListener("click", () => {
+  if (state.selectedPrId) void loadPullRequestDiff(state.selectedPrId);
+});
+
+els.newPrForm.addEventListener("submit", async (e) => {
+  const submitter = e.submitter;
+  if (!submitter || submitter.value !== "create") return;
+  e.preventDefault();
+  const fd = new FormData(els.newPrForm);
+  try {
+    const pullRequest = await api("/api/pull-requests", {
+      method: "POST",
+      body: JSON.stringify({
+        title: fd.get("title"),
+        description: fd.get("description") || "",
+        repositoryPath: fd.get("repositoryPath"),
+        baseBranch: fd.get("baseBranch"),
+        baseSha: fd.get("baseSha"),
+        headBranch: fd.get("headBranch"),
+        headSha: fd.get("headSha"),
+        issueId: fd.get("issueId") || undefined,
+        author: fd.get("author") || "human",
+        origin: "external",
+      }),
+    });
+    els.newPrDialog.close();
+    els.newPrForm.reset();
+    switchView("pull-requests");
+    await loadPullRequests();
+    await selectPullRequest(pullRequest.id);
+    showToast("Local PR created");
+  } catch (err) {
+    showToast(err.message);
+  }
+});
 
 els.newIssueForm.addEventListener("submit", async (e) => {
   const submitter = e.submitter;
@@ -565,6 +940,7 @@ els.settingsBtn.addEventListener("click", () => {
   form.webhookUrl.value = state.config.webhookUrl;
   form.labelFilter.value = state.config.labelFilter;
   form.commentTrigger.value = state.config.commentTrigger;
+  form.defaultRepositoryPath.value = state.config.defaultRepositoryPath || "";
   form.webhookEnabled.checked = state.config.webhookEnabled;
   els.settingsDialog.showModal();
 });
@@ -580,12 +956,39 @@ els.settingsForm.addEventListener("submit", async (e) => {
       webhookUrl: fd.get("webhookUrl"),
       labelFilter: fd.get("labelFilter"),
       commentTrigger: fd.get("commentTrigger"),
+      defaultRepositoryPath: fd.get("defaultRepositoryPath"),
       webhookEnabled: fd.get("webhookEnabled") === "on",
     }),
   });
   els.settingsDialog.close();
   showToast("Settings saved");
 });
+
+els.browseDefaultRepositoryBtn.addEventListener("click", () => {
+  void openRepositoryPicker(els.settingsForm.defaultRepositoryPath);
+});
+els.browsePrRepositoryBtn.addEventListener("click", () => {
+  void openRepositoryPicker(els.newPrForm.repositoryPath);
+});
+els.repositoryPickerForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  void loadRepositoryDirectory(els.repositoryPickerPath.value);
+});
+els.repositoryPickerUp.addEventListener("click", () => {
+  if (state.repositoryBrowse?.parent) {
+    void loadRepositoryDirectory(state.repositoryBrowse.parent);
+  }
+});
+els.repositoryPickerSelect.addEventListener("click", () => {
+  if (state.repositoryBrowse?.isGitRepository) {
+    chooseRepository(state.repositoryBrowse.path);
+  }
+});
+for (const button of document.querySelectorAll("[data-close-dialog]")) {
+  button.addEventListener("click", () => {
+    button.closest("dialog")?.close();
+  });
+}
 
 els.saveBtn.addEventListener("click", () => void saveSelectedIssue());
 els.triggerBtn.addEventListener("click", () => void sendWebhook());
@@ -626,11 +1029,28 @@ for (const btn of els.filterBtns) {
   });
 }
 
+for (const btn of els.prFilterBtns) {
+  btn.addEventListener("click", () => {
+    for (const item of els.prFilterBtns) item.classList.remove("active");
+    btn.classList.add("active");
+    state.prStatusFilter = btn.dataset.prStatus || "";
+    void loadPullRequests();
+  });
+}
+
 async function init() {
   await loadConfig();
   await Promise.all([loadIssues(), loadDeliveries()]);
-  const deepLink = Number(new URLSearchParams(location.search).get("issue"));
-  if (Number.isInteger(deepLink) && deepLink > 0) await selectIssue(deepLink);
+  const params = new URLSearchParams(location.search);
+  const pullRequestDeepLink = Number(params.get("pr"));
+  if (Number.isInteger(pullRequestDeepLink) && pullRequestDeepLink > 0) {
+    switchView("pull-requests");
+    await loadPullRequests();
+    await selectPullRequest(pullRequestDeepLink);
+    return;
+  }
+  const issueDeepLink = Number(params.get("issue"));
+  if (Number.isInteger(issueDeepLink) && issueDeepLink > 0) await selectIssue(issueDeepLink);
 }
 
 init().catch((err) => showToast(err.message));

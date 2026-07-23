@@ -1,6 +1,6 @@
 # Acme Issues
 
-A small, self-contained issue tracker for local development. Issues live in SQLite; outbound webhooks POST JSON to any URL you configure.
+A small, self-contained issue and local pull-request manager. Issues, Git-backed PR identities, SHA-bound review history, findings, and checks live in SQLite.
 
 Pairs naturally with [Helix](https://github.com/eimg/helix) for local agent-driven workflows — no GitHub account required.
 
@@ -12,7 +12,7 @@ Acme Issues is one of four related projects. They remain separate products with 
 |---|---|
 | **[Primer](https://github.com/eimg/primer)** | Knowledge product and fictional Acme evidence corpus; not currently part of the runtime loop. |
 | **[Helix](https://github.com/eimg/helix)** | Agent workflow control plane that receives work and orchestrates changes. |
-| **[Acme Issues](https://github.com/eimg/acme-issues)** | Local issue tracker and webhook harness that triggers Helix and receives callbacks. |
+| **[Acme Issues](https://github.com/eimg/acme-issues)** | Local issue and PR management surface that triggers Helix and receives callbacks. |
 | **[Acme Todo](https://github.com/eimg/acme-todo)** | Disposable target application used for agent implementation and verification. |
 
 Typical exercise: Acme Issues sends a work item to Helix, which works on Acme Todo. Primer develops the separate knowledge and retrieval side of the same fictional Acme context.
@@ -21,17 +21,22 @@ Typical exercise: Acme Issues sends a work item to Helix, which works on Acme To
 
 ## Companion project: [Helix](https://github.com/eimg/helix)
 
-This tracker is built to pair with **[Helix](https://github.com/eimg/helix)** — an agent orchestration system that runs specialist coding agents (planner, dev, verifier, …) against your repo.
+This tracker is built to pair with **[Helix](https://github.com/eimg/helix)** — an agent control plane that runs implementation specialists and an independent local PR-review workflow.
 
 | Project | Role |
 |---------|------|
-| **acme-issues** (this repo) | Create and track issues locally; fire webhooks when labeled issues appear |
-| **[Helix](https://github.com/eimg/helix)** | Receives `POST /runs`, orchestrates agents, optionally callbacks on completion |
+| **acme-issues** (this repo) | Human-facing issue and local PR management; stores review evidence and merge records |
+| **[Helix](https://github.com/eimg/helix)** | Implements issues, then independently reviews exact PR head SHAs |
 
 ```
-acme-issues (issue + label) ──POST──► Helix /runs ──► specialist agents
-       ▲                                        │
-       └──────── run.completed callback ────────┘
+issue ──POST /runs──► Helix planner → dev self-check → committed feature branch
+  ▲                                                     │
+  │                                                     ▼
+  │                                          Acme local PR (draft)
+  │                                                     │
+  │                          POST /pr-reviews────────────┘
+  │                                                     ▼
+  └──── exact-SHA evidence callback ◄──── Helix reviewer + verifier
 ```
 
 No GitHub account or `gh` CLI required for this loop.
@@ -96,7 +101,15 @@ npm run dev
 | Continuation comment command | `/helix` (default) |
 | Webhooks enabled | on |
 
-Create an open issue with the `trigger` label (or add the label to an existing issue). acme-issues delivers a webhook; Helix starts a run. Watch progress in the Helix run console. On completion, Helix POSTs back and this tracker marks the issue **closed** with a Helix comment.
+Create an open issue with the `trigger` label (or add the label to an existing issue). Acme Issues delivers a webhook and Helix starts an implementation run. When the Dev leaves a clean committed feature branch, Helix registers it here as a draft local PR. The linked issue remains **in progress**.
+
+Open the **Pull requests** view to inspect the repository, branches, exact base/head SHAs, diff, review evidence, and history. Request review to run Helix’s independent reviewer and verifier concurrently. Only a structured decision for the current head SHA can set `ready_to_merge`; a head update resets the PR to `draft` and makes older callbacks stale.
+
+Helix never performs the merge. After a human merges the reviewed head into the base branch, **Mark merged** records that result and closes the linked issue.
+
+Set **Settings → Default repository** with the local folder browser to prefill the repository path when creating local PRs. External work uses the same review path: choose **New local PR** and register an existing local repository branch and commits. It does not need to originate from a Helix implementation run.
+
+The current localhost harness assumes registered repositories and branches are trusted. Diff reading and Helix verification operate on local paths, and verification is not container-sandboxed yet.
 
 After completion, reopen the issue or add a comment such as `/helix also cover the regression case`. The tracker uses the latest completed Helix run recorded from callbacks and sends a linked continuation request. Ordinary comments do not trigger Helix.
 
@@ -110,6 +123,7 @@ Full Helix setup and config: [github.com/eimg/helix](https://github.com/eimg/hel
 | Webhook URL | *(empty — configure in Settings)* |
 | Label filter | `trigger` |
 | Continuation comment command | `/helix` |
+| Default repository | *(empty; select a local Git repository in Settings)* |
 | Webhooks enabled | `false` |
 | Data directory | `./data/` (override with `ACME_ISSUES_DATA_DIR`) |
 
@@ -139,7 +153,7 @@ Outbound payload (includes correlation for Helix callbacks):
 
 Headers: `X-Issues-Issue-Id`, `X-Issues-Source`, `X-Issues-Reason`.
 
-Failed deliveries retry up to 3 times. All attempts appear in the **Webhook deliveries** panel.
+Issue deliveries retry up to 3 times and appear in **Webhook deliveries**. PR review requests are sent directly to the Helix `/pr-reviews` endpoint derived from the configured `/runs` URL.
 
 ## Helix callbacks (inbound)
 
@@ -158,7 +172,7 @@ X-Helix-Event: run.completed
 }
 ```
 
-→ issue status `closed` + Helix comment
+→ issue status `closed` when there is no active local PR; otherwise it remains `in_progress` awaiting review and human merge
 
 The callback may include `parentRunId` and `rootRunId`. acme-issues stores this lineage and uses the newest completed run when it delivers a reopen or command-comment continuation.
 
@@ -179,6 +193,28 @@ X-Helix-Event: run.started
 
 Callbacks use no auth — intended for local development.
 
+### Local PR review callbacks
+
+Helix sends `pr.review.started` and `pr.review.completed` to the same callback endpoint. Every result carries the reviewed `headSha`. Acme Issues stores all review revisions but updates current PR readiness only when that SHA still matches:
+
+```json
+{
+  "event": "pr.review.completed",
+  "review": {
+    "id": "...",
+    "status": "completed",
+    "headSha": "abc123...",
+    "decision": "ready_to_merge",
+    "summary": "Reviewer and verifier passed.",
+    "findings": [],
+    "checks": [
+      { "name": "npm test", "status": "passed", "summary": "Passed." }
+    ]
+  },
+  "pullRequest": { "id": 4 }
+}
+```
+
 ## API
 
 | Method | Path | Purpose |
@@ -193,15 +229,24 @@ Callbacks use no auth — intended for local development.
 | `PATCH` | `/api/issues/:issueId/comments/:commentId` | Update comment (`body` and/or `author`) |
 | `DELETE` | `/api/issues/:issueId/comments/:commentId` | Delete comment |
 | `POST` | `/api/issues/:id/trigger` | Manual webhook delivery |
+| `GET` | `/api/pull-requests` | List local PRs (`?status=` optional) |
+| `POST` | `/api/pull-requests` | Register a Helix-created or external Git-backed local PR |
+| `GET` | `/api/pull-requests/:id` | Get PR identity plus review history |
+| `GET` | `/api/pull-requests/:id/diff` | Read the recorded base-to-head Git diff |
+| `PATCH` | `/api/pull-requests/:id` | Update head identity or record `draft`, `merged`, or `closed` |
+| `POST` | `/api/pull-requests/:id/review` | Request independent Helix PR review |
 | `GET` | `/api/webhooks/deliveries` | Delivery log |
 | `DELETE` | `/api/webhooks/deliveries/:id` | Remove one delivery log |
 | `DELETE` | `/api/webhooks/deliveries` | Clear all delivery logs |
 | `GET` | `/api/config` | Read settings |
 | `PATCH` | `/api/config` | Update settings |
+| `GET` | `/api/repositories/browse` | Browse server-local folders for a Git repository (`?path=` optional) |
 
 `GET /api/issues` returns `{ items, total, limit, offset }` (default `limit` 25).
 
 Issue status values: `open`, `in_progress`, `closed`.
+
+Pull-request status values: `draft`, `reviewing`, `changes_requested`, `blocked`, `ready_to_merge`, `merged`, `closed`.
 
 ## Development
 

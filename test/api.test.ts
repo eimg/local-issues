@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import request from "supertest";
@@ -41,6 +41,44 @@ describe("acme-issues API", () => {
   after(() => {
     db.close();
     rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("browses local repositories and persists a validated default repository", async () => {
+    const parent = join(dataDir, "repositories");
+    const repository = join(parent, "acme-todo");
+    mkdirSync(join(repository, ".git"), { recursive: true });
+    mkdirSync(join(repository, "src"), { recursive: true });
+
+    const browsed = await request(app)
+      .get("/api/repositories/browse")
+      .query({ path: parent })
+      .expect(200);
+    assert.equal(browsed.body.path, realpathSync(parent));
+    assert.deepEqual(
+      browsed.body.directories.map((entry: { name: string; isGitRepository: boolean }) => ({
+        name: entry.name,
+        isGitRepository: entry.isGitRepository,
+      })),
+      [{ name: "acme-todo", isGitRepository: true }],
+    );
+
+    const saved = await request(app)
+      .patch("/api/config")
+      .send({ defaultRepositoryPath: repository })
+      .expect(200);
+    assert.equal(saved.body.defaultRepositoryPath, realpathSync(repository));
+
+    const loaded = await request(app).get("/api/config").expect(200);
+    assert.equal(loaded.body.defaultRepositoryPath, realpathSync(repository));
+
+    await request(app)
+      .patch("/api/config")
+      .send({ defaultRepositoryPath: "relative/repository" })
+      .expect(400);
+    await request(app)
+      .patch("/api/config")
+      .send({ defaultRepositoryPath: parent })
+      .expect(400);
   });
 
   it("creates an issue and auto-triggers webhook when filter label present", async () => {
@@ -376,5 +414,162 @@ describe("acme-issues API", () => {
     assert.equal(next.body.offset, 2);
     assert.ok(next.body.items.length >= 1);
     assert.notEqual(next.body.items[0].id, page.body.items[0].id);
+  });
+
+  it("manages local PR review lifecycle and ignores stale SHA decisions", async () => {
+    const issue = await request(app)
+      .post("/api/issues")
+      .send({ title: "Local PR issue", body: "Acceptance criteria", labels: [] })
+      .expect(201);
+    const issueId = issue.body.issue.id as number;
+
+    const created = await request(app)
+      .post("/api/pull-requests")
+      .send({
+        issueId,
+        title: "Implement local PR",
+        description: "Review this exact change",
+        repositoryPath: "/tmp/example-repo",
+        baseBranch: "main",
+        baseSha: "base-1",
+        headBranch: "feature/local-pr",
+        headSha: "head-1",
+        author: "alice",
+        origin: "external",
+      })
+      .expect(201);
+    const pullRequestId = created.body.id as number;
+    assert.equal(created.body.status, "draft");
+
+    webhookCalls.length = 0;
+    const requested = await request(app)
+      .post(`/api/pull-requests/${pullRequestId}/review`)
+      .expect(202);
+    assert.equal(requested.body.delivery.success, true);
+    assert.equal(webhookCalls[0].url, "http://helix.test/pr-reviews");
+    assert.equal(
+      (webhookCalls[0].body as { externalEventId: string }).externalEventId,
+      `pull-request:${pullRequestId}:head:head-1`,
+    );
+
+    await request(app).post("/api/webhooks/helix").set("X-Helix-Event", "pr.review.started").send({
+      event: "pr.review.started",
+      review: {
+        id: "review-one",
+        status: "running",
+        headSha: "head-1",
+        startedAt: 100,
+      },
+      pullRequest: { id: pullRequestId },
+    }).expect(200);
+
+    await request(app).post("/api/webhooks/helix").set("X-Helix-Event", "pr.review.completed").send({
+      event: "pr.review.completed",
+      review: {
+        id: "review-one",
+        status: "completed",
+        headSha: "head-1",
+        startedAt: 100,
+        finishedAt: 200,
+        decision: "ready_to_merge",
+        summary: "reviewer and verifier passed",
+        findings: [],
+        checks: [{ name: "npm test", status: "passed", summary: "all passed" }],
+      },
+      pullRequest: { id: pullRequestId },
+    }).expect(200);
+
+    const ready = await request(app).get(`/api/pull-requests/${pullRequestId}`).expect(200);
+    assert.equal(ready.body.status, "ready_to_merge");
+    assert.equal(ready.body.reviews.length, 1);
+
+    const updatedHead = await request(app)
+      .patch(`/api/pull-requests/${pullRequestId}`)
+      .send({ headSha: "head-2" })
+      .expect(200);
+    assert.equal(updatedHead.body.status, "draft");
+    assert.equal(updatedHead.body.activeReviewRunId, undefined);
+
+    const stale = await request(app).post("/api/webhooks/helix").send({
+      event: "pr.review.completed",
+      review: {
+        id: "late-old-review",
+        status: "completed",
+        headSha: "head-1",
+        startedAt: 300,
+        finishedAt: 400,
+        decision: "ready_to_merge",
+        summary: "stale",
+      },
+      pullRequest: { id: pullRequestId },
+    }).expect(200);
+    assert.equal(stale.body.stale, true);
+    assert.equal(stale.body.pullRequest.status, "draft");
+
+    await request(app).patch(`/api/pull-requests/${pullRequestId}`)
+      .send({ status: "merged" })
+      .expect(409);
+  });
+
+  it("keeps linked issue open for PR review and closes only after human merge record", async () => {
+    const issue = await request(app)
+      .post("/api/issues")
+      .send({ title: "Human merge boundary", labels: [] })
+      .expect(201);
+    const issueId = issue.body.issue.id as number;
+    const pullRequest = await request(app).post("/api/pull-requests").send({
+      issueId,
+      title: "Ready change",
+      repositoryPath: "/tmp/example-repo",
+      baseBranch: "main",
+      baseSha: "base",
+      headBranch: "feature/ready",
+      headSha: "head",
+      author: "helix",
+      origin: "helix",
+    }).expect(201);
+    const pullRequestId = pullRequest.body.id as number;
+
+    await request(app).post("/api/webhooks/helix").send({
+      event: "run.completed",
+      run: { id: "implementation-run", status: "done", startedAt: 1, finishedAt: 2 },
+      issue: { id: issueId, title: "Human merge boundary" },
+    }).expect(200);
+    const inProgress = await request(app).get(`/api/issues/${issueId}`).expect(200);
+    assert.equal(inProgress.body.status, "in_progress");
+
+    await request(app).post("/api/webhooks/helix").send({
+      event: "pr.review.completed",
+      review: {
+        id: "review-ready",
+        status: "completed",
+        headSha: "head",
+        startedAt: 3,
+        finishedAt: 4,
+        decision: "ready_to_merge",
+        summary: "ready",
+      },
+      pullRequest: { id: pullRequestId },
+    }).expect(200);
+
+    await request(app).patch(`/api/pull-requests/${pullRequestId}`)
+      .send({ status: "merged", mergeCommitSha: "merge-sha" })
+      .expect(200);
+    const closed = await request(app).get(`/api/issues/${issueId}`).expect(200);
+    assert.equal(closed.body.status, "closed");
+  });
+
+  it("serves the pull request management interface", async () => {
+    const page = await request(app).get("/").expect(200);
+    assert.match(page.text, /Pull requests/);
+    assert.match(page.text, /id="pr-list"/);
+    assert.match(page.text, /id="request-review-btn"/);
+    assert.match(page.text, /id="browse-default-repository-btn"/);
+    assert.match(page.text, /id="repository-picker-dialog"/);
+    assert.match(page.text, /data-close-dialog type="button">Cancel/);
+    const script = await request(app).get("/app.js").expect(200);
+    assert.match(script.text, /currentHeadReviewed/);
+    assert.match(script.text, /Review again/);
+    assert.match(script.text, /requestReviewBtn\.classList\.toggle\("hidden", reviewClosed\)/);
   });
 });
