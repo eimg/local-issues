@@ -41,6 +41,18 @@ issue ──POST /runs──► Helix planner → dev self-check → committed f
 
 No GitHub account or `gh` CLI required for this loop.
 
+## Pull request review lifecycle
+
+Acme Issues is the durable human-facing side of the review boundary:
+
+1. A trusted producer registers a Git-backed PR with its repository path, base branch/SHA, head branch/SHA, author, origin, and optional linked issue. Helix normally supplies this after a successful implementation run.
+2. A human requests review. Acme Issues sends the immutable PR identity and an idempotent callback identity to Helix’s independent `/pr-reviews` workflow.
+3. Helix runs its reviewer and verifier against that exact head SHA, then returns lifecycle events, findings, executed checks, summary, and one of `ready_to_merge`, `changes_requested`, or `blocked`.
+4. Acme Issues stores every review revision, but applies a decision to the current PR only when the returned head SHA still matches. Changing the head resets readiness to `draft`; older evidence remains visible as history.
+5. `ready_to_merge` does not merge Git. A human merges the reviewed head, then records the result with **Mark merged**, which closes the linked issue.
+
+This boundary lets the same review workflow accept Helix-created PRs and PRs registered by another trusted producer without making GitHub a dependency. Registered repositories and their verification commands are currently assumed trusted; the local harness is not a sandbox for hostile contributions.
+
 ## Requirements
 
 - Node.js ≥ 20
@@ -252,8 +264,7 @@ Pull-request status values: `draft`, `reviewing`, `changes_requested`, `blocked`
 
 ## Development
 
-The React and TanStack Query interface is served at `/`. The development
-command rebuilds the React bundle before starting the local server.
+The web interface is served at `/`.
 
 ```bash
 npm run dev -- --port 8320
