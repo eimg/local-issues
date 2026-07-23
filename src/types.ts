@@ -31,7 +31,6 @@ export interface AppConfig {
   commentTrigger: string;
   webhookEnabled: boolean;
   baseUrl: string;
-  defaultRepositoryPath: string;
 }
 
 export interface WebhookPayload {

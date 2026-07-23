@@ -16,7 +16,6 @@ import type {
   PullRequestStatus,
   WebhookDelivery,
 } from "../../src/types";
-import type { RepositoryBrowseResult } from "../../src/repositoryBrowser";
 import { api, formatStatus, formatTime } from "./api";
 
 type View = "issues" | "pull-requests";
@@ -29,7 +28,7 @@ export function App() {
   const [view, setView] = useState<View>(initialPr ? "pull-requests" : "issues");
   const [selectedIssueId, setSelectedIssueId] = useState<number | null>(initialIssue);
   const [selectedPrId, setSelectedPrId] = useState<number | null>(initialPr);
-  const [dialog, setDialog] = useState<"issue" | "pr" | "settings" | null>(null);
+  const [dialog, setDialog] = useState<"issue" | "settings" | null>(null);
   const [toast, setToast] = useState("");
   const config = useQuery({
     queryKey: ["config"],
@@ -45,7 +44,7 @@ export function App() {
         view={view}
         onView={setView}
         onSettings={() => setDialog("settings")}
-        onCreate={() => setDialog(view === "issues" ? "issue" : "pr")}
+        onNewIssue={() => setDialog("issue")}
       />
       {view === "issues" ? (
         <IssuesWorkspace
@@ -72,18 +71,6 @@ export function App() {
           }}
         />
       )}
-      {dialog === "pr" && (
-        <NewPullRequestDialog
-          defaultRepositoryPath={config.data?.defaultRepositoryPath || ""}
-          onClose={() => setDialog(null)}
-          onCreated={(pr) => {
-            setDialog(null);
-            setView("pull-requests");
-            setSelectedPrId(pr.id);
-            showToast("Local PR created");
-          }}
-        />
-      )}
       {dialog === "settings" && config.data && (
         <SettingsDialog
           config={config.data}
@@ -103,12 +90,12 @@ function Header({
   view,
   onView,
   onSettings,
-  onCreate,
+  onNewIssue,
 }: {
   view: View;
   onView: (view: View) => void;
   onSettings: () => void;
-  onCreate: () => void;
+  onNewIssue: () => void;
 }) {
   return (
     <header className="app-header">
@@ -137,9 +124,11 @@ function Header({
         <button className="btn btn-ghost" onClick={onSettings}>
           <Icon name="settings" /> Settings
         </button>
-        <button className="btn btn-primary" onClick={onCreate}>
-          <Icon name="plus" /> {view === "issues" ? "New issue" : "New local PR"}
-        </button>
+        {view === "issues" && (
+          <button className="btn btn-primary" onClick={onNewIssue}>
+            <Icon name="plus" /> New issue
+          </button>
+        )}
       </div>
     </header>
   );
@@ -891,7 +880,6 @@ function SettingsDialog({
   onSaved: () => void;
 }) {
   const client = useQueryClient();
-  const [repositoryPath, setRepositoryPath] = useState(config.defaultRepositoryPath);
   const save = useMutation({
     mutationFn: (payload: Partial<AppConfig>) => api<AppConfig>("/api/config", {
       method: "PATCH",
@@ -912,7 +900,6 @@ function SettingsDialog({
             webhookUrl: String(form.get("webhookUrl") || ""),
             labelFilter: String(form.get("labelFilter") || ""),
             commentTrigger: String(form.get("commentTrigger") || ""),
-            defaultRepositoryPath: repositoryPath,
             webhookEnabled: form.get("webhookEnabled") === "on",
           });
         }}
@@ -928,12 +915,6 @@ function SettingsDialog({
         <Field label="Continuation comment command">
           <input name="commentTrigger" className="input" defaultValue={config.commentTrigger} placeholder="/helix" autoComplete="off" />
         </Field>
-        <RepositoryField
-          label="Default repository"
-          value={repositoryPath}
-          onChange={setRepositoryPath}
-          help="Used to prefill new local pull requests."
-        />
         <label className="checkbox-row">
           <input name="webhookEnabled" type="checkbox" defaultChecked={config.webhookEnabled} />
           <span>Enable webhooks</span>
@@ -945,224 +926,12 @@ function SettingsDialog({
   );
 }
 
-function NewPullRequestDialog({
-  defaultRepositoryPath,
-  onClose,
-  onCreated,
-}: {
-  defaultRepositoryPath: string;
-  onClose: () => void;
-  onCreated: (pullRequest: PullRequest) => void;
-}) {
-  const client = useQueryClient();
-  const [repositoryPath, setRepositoryPath] = useState(defaultRepositoryPath);
-  const create = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => api<PullRequest>("/api/pull-requests", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-    onSuccess: async (pullRequest) => {
-      await client.invalidateQueries({ queryKey: ["pull-requests"] });
-      onCreated(pullRequest);
-    },
-  });
-  return (
-    <Modal wide onClose={onClose}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          const issueId = String(form.get("issueId") || "").trim();
-          create.mutate({
-            title: form.get("title"),
-            description: form.get("description") || "",
-            repositoryPath,
-            baseBranch: form.get("baseBranch"),
-            baseSha: form.get("baseSha"),
-            headBranch: form.get("headBranch"),
-            headSha: form.get("headSha"),
-            issueId: issueId || undefined,
-            author: form.get("author") || "human",
-            origin: "external",
-          });
-        }}
-      >
-        <h2>New local pull request</h2>
-        <p className="dialog-subtitle">Register an existing local Git branch for independent Helix review.</p>
-        <div className="form-grid">
-          <Field label="Title" wide>
-            <input name="title" className="input" required autoFocus autoComplete="off" />
-          </Field>
-          <Field label="Description" wide>
-            <textarea name="description" className="input" rows={3} />
-          </Field>
-          <RepositoryField label="Repository path" value={repositoryPath} onChange={setRepositoryPath} required wide />
-          <Field label="Base branch">
-            <input name="baseBranch" className="input" defaultValue="main" required autoComplete="off" />
-          </Field>
-          <Field label="Base SHA">
-            <input name="baseSha" className="input" required autoComplete="off" />
-          </Field>
-          <Field label="Head branch">
-            <input name="headBranch" className="input" required autoComplete="off" />
-          </Field>
-          <Field label="Head SHA">
-            <input name="headSha" className="input" required autoComplete="off" />
-          </Field>
-          <Field label="Linked issue ID (optional)">
-            <input name="issueId" className="input" type="number" min={1} autoComplete="off" />
-          </Field>
-          <Field label="Author">
-            <input name="author" className="input" defaultValue="human" autoComplete="off" />
-          </Field>
-        </div>
-        <MutationError mutation={create} />
-        <DialogActions onClose={onClose} busy={create.isPending} submitLabel="Create local PR" />
-      </form>
-    </Modal>
-  );
-}
-
-function RepositoryField({
-  label,
-  value,
-  onChange,
-  help,
-  required = false,
-  wide = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  help?: string;
-  required?: boolean;
-  wide?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Field label={label} help={help} wide={wide}>
-        <span className="input-action-row">
-          <input
-            className="input"
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            required={required}
-            placeholder="/absolute/path/to/repository"
-            autoComplete="off"
-          />
-          <button className="btn btn-secondary" type="button" onClick={() => setOpen(true)}>
-            <Icon name="folder" /> Browse
-          </button>
-        </span>
-      </Field>
-      {open && (
-        <RepositoryPicker
-          initialPath={value}
-          onClose={() => setOpen(false)}
-          onSelect={(path) => {
-            onChange(path);
-            setOpen(false);
-          }}
-        />
-      )}
-    </>
-  );
-}
-
-function RepositoryPicker({
-  initialPath,
-  onClose,
-  onSelect,
-}: {
-  initialPath: string;
-  onClose: () => void;
-  onSelect: (path: string) => void;
-}) {
-  const [path, setPath] = useState(initialPath);
-  const [requestedPath, setRequestedPath] = useState(initialPath);
-  const browse = useQuery({
-    queryKey: ["repository-browse", requestedPath],
-    queryFn: () => api<RepositoryBrowseResult>(
-      `/api/repositories/browse${requestedPath ? `?path=${encodeURIComponent(requestedPath)}` : ""}`,
-    ),
-    retry: false,
-  });
-  useEffect(() => {
-    if (browse.data) setPath(browse.data.path);
-  }, [browse.data]);
-  const go = (nextPath: string) => {
-    setPath(nextPath);
-    setRequestedPath(nextPath);
-  };
-  return (
-    <Modal wide onClose={onClose}>
-      <form onSubmit={(event) => { event.preventDefault(); go(path); }}>
-        <h2>Choose repository</h2>
-        <p className="dialog-subtitle">Browse folders visible to this local Acme Issues server.</p>
-        <div className="repository-picker-location">
-          <button
-            className="btn btn-secondary"
-            type="button"
-            aria-label="Parent folder"
-            disabled={!browse.data?.parent}
-            onClick={() => browse.data?.parent && go(browse.data.parent)}
-          >
-            <Icon name="chevron-left" /> Up
-          </button>
-          <input className="input" aria-label="Current folder" value={path} onChange={(event) => setPath(event.target.value)} autoComplete="off" />
-          <button className="btn btn-secondary" type="submit">Go</button>
-        </div>
-        <div className="repository-picker-list" aria-live="polite">
-          {browse.isPending && <p className="repository-picker-empty">Loading folders…</p>}
-          {browse.data?.directories.map((directory) => (
-            <div className="repository-picker-item" key={directory.path}>
-              <button className="repository-picker-folder" type="button" onClick={() => go(directory.path)}>
-                {directory.name}
-              </button>
-              {directory.isGitRepository && (
-                <>
-                  <span className="repository-picker-badge">Git</span>
-                  <button className="btn btn-secondary btn-sm" type="button" onClick={() => onSelect(directory.path)}>
-                    Use
-                  </button>
-                </>
-              )}
-            </div>
-          ))}
-          {browse.data && !browse.data.directories.length && <p className="repository-picker-empty">No subfolders</p>}
-        </div>
-        <p className={`field-help ${browse.isError ? "react-error" : ""}`}>
-          {browse.isError
-            ? browse.error.message
-            : browse.data?.isGitRepository
-              ? "This folder is a Git repository."
-              : "Choose a Git repository folder."}
-        </p>
-        <div className="dialog-actions">
-          <button className="btn btn-ghost" type="button" onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn-primary"
-            type="button"
-            disabled={!browse.data?.isGitRepository}
-            onClick={() => browse.data && onSelect(browse.data.path)}
-          >
-            Use this repository
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
 function Modal({
   children,
   onClose,
-  wide = false,
 }: {
   children: ReactNode;
   onClose: () => void;
-  wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -1171,7 +940,7 @@ function Modal({
   return (
     <dialog
       ref={ref}
-      className={`dialog ${wide ? "dialog-wide" : ""}`}
+      className="dialog"
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -1188,19 +957,14 @@ function Modal({
 function Field({
   label,
   children,
-  help,
-  wide = false,
 }: {
   label: string;
   children: ReactNode;
-  help?: string;
-  wide?: boolean;
 }) {
   return (
-    <label className={`field ${wide ? "field-span-2" : ""}`}>
+    <label className="field">
       <span className="field-label">{label}</span>
       {children}
-      {help && <span className="field-help">{help}</span>}
     </label>
   );
 }
@@ -1300,7 +1064,6 @@ function BrandMark() {
 type IconName =
   | "chevron-left"
   | "chevron-right"
-  | "folder"
   | "plus"
   | "refresh"
   | "search"
@@ -1312,7 +1075,6 @@ function Icon({ name, className = "" }: { name: IconName; className?: string }) 
   const paths: Record<IconName, ReactNode> = {
     "chevron-left": <path d="m15 18-6-6 6-6" />,
     "chevron-right": <path d="m9 18 6-6-6-6" />,
-    folder: <path d="M3 6.75A1.75 1.75 0 0 1 4.75 5h4l2 2h8.5A1.75 1.75 0 0 1 21 8.75v8.5A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25z" />,
     plus: <><path d="M12 5v14" /><path d="M5 12h14" /></>,
     refresh: <><path d="M20 7v5h-5" /><path d="M4 17v-5h5" /><path d="M6.1 8.3A7 7 0 0 1 18.5 7L20 12M4 12l1.5 5a7 7 0 0 0 12.4-1.3" /></>,
     search: <><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></>,

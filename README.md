@@ -107,7 +107,11 @@ Open the **Pull requests** view to inspect the repository, branches, exact base/
 
 Helix never performs the merge. After a human merges the reviewed head into the base branch, **Mark merged** records that result and closes the linked issue.
 
-Set **Settings → Default repository** with the local folder browser to prefill the repository path when creating local PRs. External work uses the same review path: choose **New local PR** and register an existing local repository branch and commits. It does not need to originate from a Helix implementation run.
+The UI intentionally does not create pull requests or select repositories.
+Helix supplies the repository, branch, and exact SHA identity when it registers
+completed implementation work. The registration API retains the same generic
+contract so another trusted producer can integrate later without changing the
+review lifecycle.
 
 The current localhost harness assumes registered repositories and branches are trusted. Diff reading and Helix verification operate on local paths, and verification is not container-sandboxed yet.
 
@@ -123,7 +127,6 @@ Full Helix setup and config: [github.com/eimg/helix](https://github.com/eimg/hel
 | Webhook URL | *(empty — configure in Settings)* |
 | Label filter | `trigger` |
 | Continuation comment command | `/helix` |
-| Default repository | *(empty; select a local Git repository in Settings)* |
 | Webhooks enabled | `false` |
 | Data directory | `./data/` (override with `ACME_ISSUES_DATA_DIR`) |
 
@@ -230,7 +233,7 @@ Helix sends `pr.review.started` and `pr.review.completed` to the same callback e
 | `DELETE` | `/api/issues/:issueId/comments/:commentId` | Delete comment |
 | `POST` | `/api/issues/:id/trigger` | Manual webhook delivery |
 | `GET` | `/api/pull-requests` | List local PRs (`?status=` optional) |
-| `POST` | `/api/pull-requests` | Register a Helix-created or external Git-backed local PR |
+| `POST` | `/api/pull-requests` | Register a Git-backed PR from Helix or another trusted producer |
 | `GET` | `/api/pull-requests/:id` | Get PR identity plus review history |
 | `GET` | `/api/pull-requests/:id/diff` | Read the recorded base-to-head Git diff |
 | `PATCH` | `/api/pull-requests/:id` | Update head identity or record `draft`, `merged`, or `closed` |
@@ -240,7 +243,6 @@ Helix sends `pr.review.started` and `pr.review.completed` to the same callback e
 | `DELETE` | `/api/webhooks/deliveries` | Clear all delivery logs |
 | `GET` | `/api/config` | Read settings |
 | `PATCH` | `/api/config` | Update settings |
-| `GET` | `/api/repositories/browse` | Browse server-local folders for a Git repository (`?path=` optional) |
 
 `GET /api/issues` returns `{ items, total, limit, offset }` (default `limit` 25).
 

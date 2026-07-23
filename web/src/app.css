@@ -468,20 +468,6 @@ body {
   color: var(--text-secondary);
 }
 
-.dialog.dialog-wide {
-  width: min(720px, calc(100vw - 32px));
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.field-span-2 {
-  grid-column: span 2;
-}
-
 @media (max-width: 900px) {
   .pr-layout {
     grid-template-columns: 1fr;
@@ -521,14 +507,6 @@ body {
 
   .pr-layout {
     padding: 12px;
-  }
-
-  .form-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .field-span-2 {
-    grid-column: span 1;
   }
 }
 
@@ -1307,17 +1285,6 @@ textarea.input {
   color: var(--muted);
 }
 
-.input-action-row {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-
-.input-action-row .input {
-  min-width: 0;
-  flex: 1;
-}
-
 .checkbox-row {
   display: flex;
   align-items: center;
@@ -1340,75 +1307,6 @@ textarea.input {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
-}
-
-.repository-picker-location {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.repository-picker-list {
-  min-height: 180px;
-  max-height: min(45vh, 360px);
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-subtle);
-}
-
-.repository-picker-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.repository-picker-item:last-child {
-  border-bottom: 0;
-}
-
-.repository-picker-folder {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.repository-picker-folder::before {
-  content: "📁";
-  margin-right: 8px;
-}
-
-.repository-picker-folder:hover {
-  color: var(--accent);
-}
-
-.repository-picker-badge {
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: var(--success-soft);
-  color: var(--success);
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.repository-picker-empty {
-  margin: 0;
-  padding: 22px;
-  color: var(--muted);
-  text-align: center;
 }
 
 /* ————————————————————————————————————————————————

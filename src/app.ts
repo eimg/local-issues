@@ -45,7 +45,6 @@ import {
   updatePullRequest,
 } from "./pullRequests.js";
 import { readPullRequestDiff } from "./pullRequestDiff.js";
-import { browseRepositoryDirectories, validateRepositoryPath } from "./repositoryBrowser.js";
 
 const bundledReactDir = join(dirname(fileURLToPath(import.meta.url)), "react");
 const reactDir = existsSync(bundledReactDir)
@@ -87,30 +86,8 @@ export function createApp(opts: CreateAppOptions): Express {
     }
     if (typeof body.webhookEnabled === "boolean") patch.webhookEnabled = body.webhookEnabled;
     if (typeof body.baseUrl === "string") patch.baseUrl = body.baseUrl.trim();
-    if (typeof body.defaultRepositoryPath === "string") {
-      const input = body.defaultRepositoryPath.trim();
-      try {
-        patch.defaultRepositoryPath = input ? await validateRepositoryPath(input) : "";
-      } catch (err) {
-        res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-        return;
-      }
-    }
     const config = saveConfig(db, patch as Parameters<typeof saveConfig>[1]);
     res.json(config);
-  });
-
-  app.get("/api/repositories/browse", async (req, res) => {
-    const config = loadConfig(db);
-    const requestedPath =
-      typeof req.query.path === "string" && req.query.path.trim()
-        ? req.query.path.trim()
-        : config.defaultRepositoryPath || dirname(process.cwd());
-    try {
-      res.json(await browseRepositoryDirectories(requestedPath));
-    } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-    }
   });
 
   app.get("/api/issues", (req, res) => {

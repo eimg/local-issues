@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import request from "supertest";
@@ -41,44 +41,6 @@ describe("acme-issues API", () => {
   after(() => {
     db.close();
     rmSync(dataDir, { recursive: true, force: true });
-  });
-
-  it("browses local repositories and persists a validated default repository", async () => {
-    const parent = join(dataDir, "repositories");
-    const repository = join(parent, "acme-todo");
-    mkdirSync(join(repository, ".git"), { recursive: true });
-    mkdirSync(join(repository, "src"), { recursive: true });
-
-    const browsed = await request(app)
-      .get("/api/repositories/browse")
-      .query({ path: parent })
-      .expect(200);
-    assert.equal(browsed.body.path, realpathSync(parent));
-    assert.deepEqual(
-      browsed.body.directories.map((entry: { name: string; isGitRepository: boolean }) => ({
-        name: entry.name,
-        isGitRepository: entry.isGitRepository,
-      })),
-      [{ name: "acme-todo", isGitRepository: true }],
-    );
-
-    const saved = await request(app)
-      .patch("/api/config")
-      .send({ defaultRepositoryPath: repository })
-      .expect(200);
-    assert.equal(saved.body.defaultRepositoryPath, realpathSync(repository));
-
-    const loaded = await request(app).get("/api/config").expect(200);
-    assert.equal(loaded.body.defaultRepositoryPath, realpathSync(repository));
-
-    await request(app)
-      .patch("/api/config")
-      .send({ defaultRepositoryPath: "relative/repository" })
-      .expect(400);
-    await request(app)
-      .patch("/api/config")
-      .send({ defaultRepositoryPath: parent })
-      .expect(400);
   });
 
   it("creates an issue and auto-triggers webhook when filter label present", async () => {
@@ -565,6 +527,7 @@ describe("acme-issues API", () => {
 
     await request(app).get("/legacy").expect(404);
     await request(app).get("/app.js").expect(404);
+    await request(app).get("/api/repositories/browse").expect(404);
 
     const reactPreview = await request(app).get("/react").expect(302);
     assert.equal(reactPreview.headers.location, "/");
