@@ -1,0 +1,27 @@
+#root {
+  min-height: 100vh;
+}
+
+.react-port-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--violet-border);
+  border-radius: 999px;
+  background: var(--violet-soft);
+  color: var(--violet);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.query-state {
+  padding: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.react-error {
+  color: var(--danger);
+}

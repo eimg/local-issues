@@ -571,5 +571,8 @@ describe("acme-issues API", () => {
     assert.match(script.text, /currentHeadReviewed/);
     assert.match(script.text, /Review again/);
     assert.match(script.text, /requestReviewBtn\.classList\.toggle\("hidden", reviewClosed\)/);
+
+    const reactPreview = await request(app).get("/react").expect(301);
+    assert.equal(reactPreview.headers.location, "/react/");
   });
 });

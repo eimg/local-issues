@@ -1,6 +1,7 @@
 import express, { type Express, type Request, type Response } from "express";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { loadConfig, saveConfig, setBaseUrl } from "./config.js";
 import {
@@ -47,6 +48,10 @@ import { readPullRequestDiff } from "./pullRequestDiff.js";
 import { browseRepositoryDirectories, validateRepositoryPath } from "./repositoryBrowser.js";
 
 const publicDir = join(dirname(fileURLToPath(import.meta.url)), "public");
+const bundledReactDir = join(dirname(fileURLToPath(import.meta.url)), "react");
+const reactDir = existsSync(bundledReactDir)
+  ? bundledReactDir
+  : resolve(process.cwd(), "dist/react");
 
 export interface CreateAppOptions {
   db: Database.Database;
@@ -60,6 +65,8 @@ export function createApp(opts: CreateAppOptions): Express {
 
   app.use(express.json());
   app.use(express.static(publicDir));
+  app.use("/react", express.static(reactDir));
+  app.get("/react", (_req, res) => res.redirect("/react/"));
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
