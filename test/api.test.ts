@@ -1,6 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import request from "supertest";
@@ -30,8 +31,25 @@ describe("acme-issues API", () => {
     const dispatcher = new WebhookDispatcher({
       db,
       fetchFn: async (url, init) => {
-        webhookCalls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
-        return new Response(JSON.stringify({ ok: true }), { status: 202 });
+        const href = String(url);
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        webhookCalls.push({ url: href, body });
+        if (href.includes("/continuations")) {
+          return new Response(
+            JSON.stringify({ id: `child-run-${webhookCalls.length}`, status: "running" }),
+            { status: 202 },
+          );
+        }
+        if (href.endsWith("/workspace")) {
+          return new Response(JSON.stringify({ cwd: "/tmp/helix-workspace" }), { status: 200 });
+        }
+        if (href.endsWith("/local-prs/merge")) {
+          return new Response(
+            JSON.stringify({ error: "Helix merge not stubbed for this test" }),
+            { status: 501 },
+          );
+        }
+        return new Response(JSON.stringify({ ok: true, id: `run-${webhookCalls.length}` }), { status: 202 });
       },
     });
 
@@ -278,7 +296,7 @@ describe("acme-issues API", () => {
       .send({ body: "/helix also cover the regression case", author: "alice" })
       .expect(201);
 
-    assert.equal(comment.body.issue.status, "open");
+    assert.equal(comment.body.issue.status, "in_progress");
     assert.equal(comment.body.delivery.success, true);
     assert.equal(webhookCalls.length, 1);
     assert.equal(webhookCalls[0].url, "http://helix.test/runs/root-run/continuations");
@@ -287,6 +305,10 @@ describe("acme-issues API", () => {
       externalEventId: `comment:${comment.body.id}`,
       trigger: "issue.comment",
     });
+
+    const detail = await request(app).get(`/api/issues/${issueId}`).expect(200);
+    assert.equal(detail.body.helix.activeRun.trigger, "issue.comment");
+    assert.equal(detail.body.status, "in_progress");
   });
 
   it("reopen targets the latest completed Helix run", async () => {
@@ -519,6 +541,332 @@ describe("acme-issues API", () => {
       .expect(200);
     const closed = await request(app).get(`/api/issues/${issueId}`).expect(200);
     assert.equal(closed.body.status, "closed");
+  });
+
+  it("addresses failed PR review by continuing the linked Helix run", async () => {
+    const issue = await request(app)
+      .post("/api/issues")
+      .send({ title: "Needs follow-up", labels: [] })
+      .expect(201);
+    const issueId = issue.body.issue.id as number;
+    const pullRequest = await request(app).post("/api/pull-requests").send({
+      issueId,
+      title: "Change with feedback",
+      repositoryPath: "/tmp/example-repo",
+      baseBranch: "main",
+      baseSha: "base",
+      headBranch: "feature/feedback",
+      headSha: "head-feedback",
+      author: "helix",
+      origin: "helix",
+    }).expect(201);
+    const pullRequestId = pullRequest.body.id as number;
+
+    await request(app).post("/api/webhooks/helix").send({
+      event: "run.completed",
+      run: { id: "impl-run", status: "done", startedAt: 1, finishedAt: 2 },
+      issue: { id: issueId, title: "Needs follow-up" },
+    }).expect(200);
+
+    await request(app).post("/api/webhooks/helix").send({
+      event: "pr.review.completed",
+      review: {
+        id: "review-cr",
+        status: "completed",
+        headSha: "head-feedback",
+        startedAt: 3,
+        finishedAt: 4,
+        decision: "changes_requested",
+        summary: "Tests are missing for the failure path.",
+        findings: [
+          {
+            severity: "blocking",
+            title: "Missing regression coverage",
+            details: "Add a failing-path test before merge.",
+          },
+        ],
+        checks: [{ name: "unit", status: "failed", summary: "1 failed" }],
+      },
+      pullRequest: { id: pullRequestId },
+    }).expect(200);
+
+    webhookCalls.length = 0;
+    const addressed = await request(app)
+      .post(`/api/pull-requests/${pullRequestId}/address-feedback`)
+      .expect(202);
+
+    assert.equal(addressed.body.parentRunId, "impl-run");
+    assert.equal(addressed.body.delivery.success, true);
+    assert.equal(addressed.body.activeRun.status, "running");
+    assert.equal(addressed.body.activeRun.trigger, "pull_request.address_feedback");
+    assert.equal(addressed.body.issue.status, "in_progress");
+    assert.equal(webhookCalls.length, 1);
+    assert.equal(webhookCalls[0].url, "http://helix.test/runs/impl-run/continuations");
+    const body = webhookCalls[0].body as {
+      instruction: string;
+      externalEventId: string;
+      trigger: string;
+    };
+    assert.equal(body.trigger, "pull_request.address_feedback");
+    assert.match(body.externalEventId, new RegExp(`^pr-address-feedback:${pullRequestId}:review:`));
+    assert.match(body.instruction, /Missing regression coverage/);
+    assert.match(body.instruction, /Tests are missing/);
+    assert.equal(addressed.body.comment.source, "system");
+    assert.match(addressed.body.comment.body, /Addressing PR/);
+
+    const issueDetail = await request(app).get(`/api/issues/${issueId}`).expect(200);
+    assert.equal(issueDetail.body.helix.activeRun.runId, addressed.body.activeRun.runId);
+    assert.equal(issueDetail.body.helix.activeRun.trigger, "pull_request.address_feedback");
+
+    const prDetail = await request(app).get(`/api/pull-requests/${pullRequestId}`).expect(200);
+    assert.equal(prDetail.body.helix.activeRun.runId, addressed.body.activeRun.runId);
+
+    const blocked = await request(app)
+      .post(`/api/pull-requests/${pullRequestId}/address-feedback`)
+      .expect(409);
+    assert.match(blocked.body.error, /already in progress/);
+  });
+
+  it("refuses address-feedback without a linked Helix run or wrong PR status", async () => {
+    const issue = await request(app)
+      .post("/api/issues")
+      .send({ title: "No run yet", labels: [] })
+      .expect(201);
+    const issueId = issue.body.issue.id as number;
+    const pullRequest = await request(app).post("/api/pull-requests").send({
+      issueId,
+      title: "Draft only",
+      repositoryPath: "/tmp/example-repo",
+      baseBranch: "main",
+      baseSha: "base",
+      headBranch: "feature/draft",
+      headSha: "head-draft",
+      author: "helix",
+      origin: "helix",
+    }).expect(201);
+
+    await request(app)
+      .post(`/api/pull-requests/${pullRequest.body.id}/address-feedback`)
+      .expect(409);
+
+    await request(app).post("/api/webhooks/helix").send({
+      event: "run.completed",
+      run: { id: "impl-draft", status: "done", startedAt: 1, finishedAt: 2 },
+      issue: { id: issueId, title: "No run yet" },
+    }).expect(200);
+
+    await request(app)
+      .post(`/api/pull-requests/${pullRequest.body.id}/address-feedback`)
+      .expect(409);
+  });
+
+  it("merges a ready-to-merge PR into the local base branch", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "acme-issues-merge-"));
+    try {
+      execFileSync("git", ["init", "-b", "main"], { cwd: repo });
+      execFileSync("git", ["config", "user.email", "acme@test.local"], { cwd: repo });
+      execFileSync("git", ["config", "user.name", "Acme Test"], { cwd: repo });
+      writeFileSync(join(repo, "file.txt"), "base\n");
+      execFileSync("git", ["add", "file.txt"], { cwd: repo });
+      execFileSync("git", ["commit", "-m", "base"], { cwd: repo });
+      const baseSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: repo,
+        encoding: "utf8",
+      }).trim();
+      execFileSync("git", ["checkout", "-b", "feature/merge-me"], { cwd: repo });
+      writeFileSync(join(repo, "file.txt"), "base\nchange\n");
+      execFileSync("git", ["add", "file.txt"], { cwd: repo });
+      execFileSync("git", ["commit", "-m", "change"], { cwd: repo });
+      const headSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: repo,
+        encoding: "utf8",
+      }).trim();
+      execFileSync("git", ["checkout", "main"], { cwd: repo });
+
+      const issue = await request(app)
+        .post("/api/issues")
+        .send({ title: "Merge locally", labels: [] })
+        .expect(201);
+      const issueId = issue.body.issue.id as number;
+      const created = await request(app).post("/api/pull-requests").send({
+        issueId,
+        title: "Ship local change",
+        repositoryPath: repo,
+        baseBranch: "main",
+        baseSha,
+        headBranch: "feature/merge-me",
+        headSha,
+        author: "helix",
+        origin: "helix",
+      }).expect(201);
+      const pullRequestId = created.body.id as number;
+
+      await request(app).post("/api/webhooks/helix").send({
+        event: "pr.review.completed",
+        review: {
+          id: "review-merge",
+          status: "completed",
+          headSha,
+          startedAt: 1,
+          finishedAt: 2,
+          decision: "ready_to_merge",
+          summary: "ready",
+        },
+        pullRequest: { id: pullRequestId },
+      }).expect(200);
+
+      const detail = await request(app).get(`/api/pull-requests/${pullRequestId}`).expect(200);
+      assert.equal(detail.body.status, "ready_to_merge");
+      assert.match(detail.body.mergeCommands.shell, /git merge --no-ff/);
+      assert.equal(detail.body.mergeCommands.lines.length, 3);
+
+      const merged = await request(app)
+        .post(`/api/pull-requests/${pullRequestId}/merge`)
+        .expect(200);
+      assert.equal(merged.body.pullRequest.status, "merged");
+      assert.equal(typeof merged.body.mergeCommitSha, "string");
+      assert.equal(
+        execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
+        merged.body.mergeCommitSha,
+      );
+      assert.match(
+        execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd: repo, encoding: "utf8" }),
+        /Merge local PR/,
+      );
+      assert.match(
+        execFileSync("git", ["show", "HEAD:file.txt"], { cwd: repo, encoding: "utf8" }),
+        /change/,
+      );
+
+      const closed = await request(app).get(`/api/issues/${issueId}`).expect(200);
+      assert.equal(closed.body.status, "closed");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("merges via Helix when Issues cannot see the repository path", async () => {
+    const issue = await request(app)
+      .post("/api/issues")
+      .send({ title: "Remote merge", labels: [] })
+      .expect(201);
+    const issueId = issue.body.issue.id as number;
+    const created = await request(app).post("/api/pull-requests").send({
+      issueId,
+      title: "Helix-owned change",
+      repositoryPath: "/no/such/path/from-webhook",
+      baseBranch: "main",
+      baseSha: "base",
+      headBranch: "feature/helix-merge",
+      headSha: "head-helix",
+      author: "helix",
+      origin: "helix",
+    }).expect(201);
+    const pullRequestId = created.body.id as number;
+
+    await request(app).post("/api/webhooks/helix").send({
+      event: "pr.review.completed",
+      review: {
+        id: "review-helix-merge",
+        status: "completed",
+        headSha: "head-helix",
+        startedAt: 1,
+        finishedAt: 2,
+        decision: "ready_to_merge",
+        summary: "ready",
+      },
+      pullRequest: { id: pullRequestId },
+    }).expect(200);
+
+    const dispatcher = new WebhookDispatcher({
+      db,
+      fetchFn: async (url, init) => {
+        const href = String(url);
+        if (href.endsWith("/workspace")) {
+          return new Response(JSON.stringify({ cwd: "/tmp/helix-workspace" }), { status: 200 });
+        }
+        if (href.endsWith("/local-prs/merge")) {
+          const body = JSON.parse(String(init?.body)) as {
+            pullRequest: { id: number; headSha: string };
+          };
+          assert.equal(body.pullRequest.id, pullRequestId);
+          assert.equal(body.pullRequest.headSha, "head-helix");
+          return new Response(JSON.stringify({
+            mergeCommitSha: "merge-from-helix",
+            repositoryPath: "/tmp/helix-workspace",
+            baseBranch: "main",
+            headSha: "head-helix",
+          }), { status: 200 });
+        }
+        return new Response("{}", { status: 404 });
+      },
+    });
+    const helixApp = createApp({ db, dispatcher });
+
+    const detail = await request(helixApp).get(`/api/pull-requests/${pullRequestId}`).expect(200);
+    assert.match(detail.body.mergeCommands.shell, /\/tmp\/helix-workspace/);
+
+    const merged = await request(helixApp)
+      .post(`/api/pull-requests/${pullRequestId}/merge`)
+      .expect(200);
+    assert.equal(merged.body.via, "helix");
+    assert.equal(merged.body.mergeCommitSha, "merge-from-helix");
+    assert.equal(merged.body.pullRequest.status, "merged");
+
+    const closed = await request(helixApp).get(`/api/issues/${issueId}`).expect(200);
+    assert.equal(closed.body.status, "closed");
+  });
+
+  it("deletes one pull request or clears all PR history", async () => {
+    const first = await request(app).post("/api/pull-requests").send({
+      title: "First",
+      repositoryPath: "/tmp/example-repo",
+      baseBranch: "main",
+      baseSha: "base",
+      headBranch: "feature/one",
+      headSha: "head-1",
+      author: "helix",
+      origin: "helix",
+    }).expect(201);
+    const second = await request(app).post("/api/pull-requests").send({
+      title: "Second",
+      repositoryPath: "/tmp/example-repo",
+      baseBranch: "main",
+      baseSha: "base",
+      headBranch: "feature/two",
+      headSha: "head-2",
+      author: "helix",
+      origin: "helix",
+    }).expect(201);
+
+    await request(app).post("/api/webhooks/helix").send({
+      event: "pr.review.completed",
+      review: {
+        id: "review-to-delete",
+        status: "completed",
+        headSha: "head-1",
+        startedAt: 1,
+        finishedAt: 2,
+        decision: "changes_requested",
+        summary: "needs work",
+      },
+      pullRequest: { id: first.body.id },
+    }).expect(200);
+
+    const detail = await request(app).get(`/api/pull-requests/${first.body.id}`).expect(200);
+    assert.equal(detail.body.reviews.length, 1);
+
+    await request(app).delete(`/api/pull-requests/${first.body.id}`).expect(204);
+    await request(app).get(`/api/pull-requests/${first.body.id}`).expect(404);
+    await request(app).delete(`/api/pull-requests/${first.body.id}`).expect(404);
+
+    const remaining = await request(app).get("/api/pull-requests").expect(200);
+    assert.equal(remaining.body.some((item: { id: number }) => item.id === second.body.id), true);
+
+    const cleared = await request(app).delete("/api/pull-requests").expect(200);
+    assert.ok(cleared.body.deleted >= 1);
+    const empty = await request(app).get("/api/pull-requests").expect(200);
+    assert.equal(empty.body.length, 0);
   });
 
   it("serves the React interface", async () => {

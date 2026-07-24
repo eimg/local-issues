@@ -11,7 +11,7 @@ Acme Issues is one of six related projects. They remain separate products with s
 | Project | Role |
 |---|---|
 | **[Primer](https://github.com/eimg/primer)** | Knowledge product and fictional Acme evidence corpus; not currently part of the Issues → Helix runtime loop. |
-| **[Prelude](https://github.com/eimg/prelude)** | Project inception workspace; exports bootstrap artifacts for a future Helix empty-workspace runtime. |
+| **[Prelude](https://github.com/eimg/prelude)** | Project inception workspace; exports bootstrap artifacts for Helix empty-workspace bootstrap. |
 | **[Helix](https://github.com/eimg/helix)** | Agent workflow control plane that receives work and orchestrates changes. |
 | **[Acme Issues](https://github.com/eimg/acme-issues)** | Local issue and PR management surface that triggers Helix and receives callbacks. |
 | **[Acme Projects](https://github.com/eimg/acme-projects)** | Standalone feature-idea and collaboration board for existing Helix repos; can manually create non-triggering issues here. |
@@ -26,8 +26,8 @@ Helix flow. Automatic triggering and project-card lifecycle callbacks remain
 planned. Acme Projects will not call Helix directly; see
 [`docs/workflow-model.md`](./docs/workflow-model.md).
 
-New-project inception belongs to Prelude, which exports bootstrap artifacts for a
-future Helix bootstrap capability and does not call Acme Issues or Helix today.
+New-project inception belongs to Prelude, which exports bootstrap artifacts for
+Helix empty-workspace bootstrap (`helix bootstrap`) and does not call Acme Issues or Helix today.
 
 ![Acme Issues](https://i.imgur.com/icyJMPP.jpeg)
 
@@ -61,7 +61,7 @@ Acme Issues is the durable human-facing side of the review boundary:
 2. A human requests review. Acme Issues sends the immutable PR identity and an idempotent callback identity to Helix’s independent `/pr-reviews` workflow.
 3. Helix runs its reviewer and verifier against that exact head SHA, then returns lifecycle events, findings, executed checks, summary, and one of `ready_to_merge`, `changes_requested`, or `blocked`.
 4. Acme Issues stores every review revision, but applies a decision to the current PR only when the returned head SHA still matches. Changing the head resets readiness to `draft`; older evidence remains visible as history.
-5. `ready_to_merge` does not merge Git. A human merges the reviewed head, then records the result with **Mark merged**, which closes the linked issue.
+5. `ready_to_merge` does not auto-merge Git. Use **Merge into \<base\>** to perform the local merge from the UI, or copy the shown shell commands and merge yourself, then **Record only** if needed. Recording merge closes the linked issue.
 
 This boundary lets the same review workflow accept Helix-created PRs and PRs registered by another trusted producer without making GitHub a dependency. Registered repositories and their verification commands are currently assumed trusted; the local harness is not a sandbox for hostile contributions.
 
@@ -129,7 +129,9 @@ Create an open issue with the `trigger` label (or add the label to an existing i
 
 Open the **Pull requests** view to inspect the repository, branches, exact base/head SHAs, diff, review evidence, and history. Request review to run Helix’s independent reviewer and verifier concurrently. Only a structured decision for the current head SHA can set `ready_to_merge`; a head update resets the PR to `draft` and makes older callbacks stale.
 
-Helix never performs the merge. After a human merges the reviewed head into the base branch, **Mark merged** records that result and closes the linked issue.
+Helix never performs an automatic merge. After review passes, **Merge into \<base\>** asks Helix (`POST /local-prs/merge`) to merge the reviewed head in the workspace Helix owns, then records the result and closes the linked issue. Copyable shell commands are always shown (using Helix’s workspace path when Issues cannot see the recorded path). **Record only** remains available when you already merged outside the UI.
+
+When review returns `changes_requested` or `blocked`, **Address feedback** asks Helix to continue the linked implementation run (same lineage as `/helix`), with the review findings as the continuation instruction. That is a fresh linked child run in Helix history — not a resumed session. After Helix pushes new commits, update the PR head if needed and **Request review** again.
 
 The UI intentionally does not create pull requests or select repositories.
 Helix supplies the repository, branch, and exact SHA identity when it registers
@@ -163,6 +165,7 @@ When webhooks are enabled and a URL is set, delivery fires on:
 3. **Issue reopened** — if a completed Helix run is known, continue it; otherwise start an initial run
 4. **Command comment** — a user comment beginning with the configured command continues the latest completed run
 5. **Manual** — **Send webhook** button or `POST /api/issues/:id/trigger`
+6. **Address feedback** — on a `changes_requested` / `blocked` PR, continues the latest completed Helix run for the linked issue with review findings (`POST /api/pull-requests/:id/address-feedback`)
 
 Outbound payload (includes correlation for Helix callbacks):
 
@@ -258,8 +261,11 @@ Helix sends `pr.review.started` and `pr.review.completed` to the same callback e
 | `POST` | `/api/issues/:id/trigger` | Manual webhook delivery |
 | `GET` | `/api/pull-requests` | List local PRs (`?status=` optional) |
 | `POST` | `/api/pull-requests` | Register a Git-backed PR from Helix or another trusted producer |
+| `DELETE` | `/api/pull-requests` | Clear all local PR history and reviews |
 | `GET` | `/api/pull-requests/:id` | Get PR identity plus review history |
+| `DELETE` | `/api/pull-requests/:id` | Delete one local PR and its reviews |
 | `GET` | `/api/pull-requests/:id/diff` | Read the recorded base-to-head Git diff |
+| `POST` | `/api/pull-requests/:id/merge` | Human-initiated local Git merge of a `ready_to_merge` PR |
 | `PATCH` | `/api/pull-requests/:id` | Update head identity or record `draft`, `merged`, or `closed` |
 | `POST` | `/api/pull-requests/:id/review` | Request independent Helix PR review |
 | `GET` | `/api/webhooks/deliveries` | Delivery log |

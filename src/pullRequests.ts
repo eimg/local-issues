@@ -113,15 +113,34 @@ export function listPullRequests(
   return (rows as PullRequestRow[]).map(toPullRequest);
 }
 
+export function deletePullRequest(db: Database.Database, id: number): boolean {
+  return db.prepare("DELETE FROM pull_requests WHERE id = ?").run(id).changes > 0;
+}
+
+/** Removes all local PRs and their review rows (FK CASCADE). */
+export function clearPullRequests(db: Database.Database): number {
+  return db.prepare("DELETE FROM pull_requests").run().changes;
+}
+
 export function hasUnmergedPullRequest(
   db: Database.Database,
   issueId: number,
 ): boolean {
-  return Boolean(db.prepare(`
-    SELECT 1 FROM pull_requests
+  return Boolean(getOpenPullRequestForIssue(db, issueId));
+}
+
+/** Newest unmerged local PR linked to an issue, if any. */
+export function getOpenPullRequestForIssue(
+  db: Database.Database,
+  issueId: number,
+): PullRequest | undefined {
+  const row = db.prepare(`
+    SELECT * FROM pull_requests
     WHERE issue_id = ? AND status NOT IN ('merged', 'closed')
+    ORDER BY updated_at DESC, id DESC
     LIMIT 1
-  `).get(issueId));
+  `).get(issueId) as PullRequestRow | undefined;
+  return row ? toPullRequest(row) : undefined;
 }
 
 export function updatePullRequest(

@@ -47,6 +47,10 @@ export interface ContinuationWebhookPayload {
   instruction: string;
   externalEventId: string;
   trigger: string;
+  /** When addressing PR feedback, Helix should update this local PR instead of creating another. */
+  pullRequestId?: number;
+  /** Existing head branch Helix should continue on when present locally. */
+  pullRequestHeadBranch?: string;
 }
 
 export type OutboundWebhookPayload = WebhookPayload | ContinuationWebhookPayload;
@@ -167,6 +171,22 @@ export interface HelixRunPayload {
     id: number;
     title: string;
   };
+}
+
+export interface HelixRunSummary {
+  runId: string;
+  issueId: number;
+  parentRunId?: string;
+  rootRunId: string;
+  status: string;
+  trigger?: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export interface IssueHelixActivity {
+  activeRun?: HelixRunSummary;
+  latestCompletedRun?: HelixRunSummary;
 }
 
 export type HelixRunCompletedPayload = HelixRunPayload;

@@ -91,7 +91,7 @@ export class WebhookDispatcher {
         error: `Skipped (${reason}): webhook URL must end in /runs`,
       });
     }
-    if (issue.status !== "open") {
+    if (issue.status === "closed") {
       return recordDelivery(this.db, {
         issueId: issue.id,
         url,
@@ -181,6 +181,106 @@ export class WebhookDispatcher {
     }
   }
 
+  /**
+   * Ask Helix to merge a reviewed local PR in the workspace Helix actually owns.
+   * Issues may only have a stale/wrong repositoryPath from webhook metadata.
+   */
+  async dispatchLocalPullRequestMerge(
+    pullRequest: PullRequest,
+  ): Promise<{
+    success: boolean;
+    statusCode: number | null;
+    error: string | null;
+    mergeCommitSha?: string;
+    repositoryPath?: string;
+  }> {
+    const config = loadConfig(this.db);
+    if (!config.webhookEnabled) {
+      return { success: false, statusCode: null, error: "Webhooks are disabled" };
+    }
+    const url = localPullRequestMergeUrl(config.webhookUrl);
+    if (!url) {
+      return {
+        success: false,
+        statusCode: null,
+        error: "Webhook URL must end in /runs so the Helix merge endpoint can be derived",
+      };
+    }
+
+    try {
+      const res = await this.fetchFn(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Issues-Reason": "pull_request.merge",
+          "X-Issues-Pull-Request-Id": String(pullRequest.id),
+          "X-Issues-Source": config.baseUrl.replace(/\/$/, ""),
+        },
+        body: JSON.stringify({
+          pullRequest: {
+            id: pullRequest.id,
+            title: pullRequest.title,
+            repositoryPath: pullRequest.repositoryPath,
+            baseBranch: pullRequest.baseBranch,
+            headBranch: pullRequest.headBranch,
+            headSha: pullRequest.headSha,
+          },
+        }),
+      });
+      const body = await res.text();
+      let parsed: { mergeCommitSha?: string; repositoryPath?: string; error?: string } = {};
+      try {
+        parsed = body ? JSON.parse(body) as typeof parsed : {};
+      } catch {
+        parsed = {};
+      }
+      if (!res.ok) {
+        return {
+          success: false,
+          statusCode: res.status,
+          error: parsed.error || `Helix merge failed (HTTP ${res.status})`,
+          repositoryPath: parsed.repositoryPath,
+        };
+      }
+      if (typeof parsed.mergeCommitSha !== "string" || !parsed.mergeCommitSha.trim()) {
+        return {
+          success: false,
+          statusCode: res.status,
+          error: "Helix merge response did not include mergeCommitSha",
+          repositoryPath: parsed.repositoryPath,
+        };
+      }
+      return {
+        success: true,
+        statusCode: res.status,
+        error: null,
+        mergeCommitSha: parsed.mergeCommitSha.trim(),
+        repositoryPath: parsed.repositoryPath,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        statusCode: null,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /** Best-effort Helix workspace cwd for copyable merge commands. */
+  async fetchHelixWorkspaceCwd(): Promise<string | undefined> {
+    const config = loadConfig(this.db);
+    const url = helixWorkspaceUrl(config.webhookUrl);
+    if (!url) return undefined;
+    try {
+      const res = await this.fetchFn(url, { method: "GET" });
+      if (!res.ok) return undefined;
+      const body = await res.json() as { cwd?: unknown };
+      return typeof body.cwd === "string" && body.cwd.trim() ? body.cwd.trim() : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async send(
     url: string,
     issueId: number,
@@ -254,6 +354,18 @@ function pullRequestReviewUrl(webhookUrl: string): string | undefined {
   const normalized = webhookUrl.trim().replace(/\/+$/, "");
   if (!normalized.endsWith("/runs")) return undefined;
   return `${normalized.slice(0, -"/runs".length)}/pr-reviews`;
+}
+
+function localPullRequestMergeUrl(webhookUrl: string): string | undefined {
+  const normalized = webhookUrl.trim().replace(/\/+$/, "");
+  if (!normalized.endsWith("/runs")) return undefined;
+  return `${normalized.slice(0, -"/runs".length)}/local-prs/merge`;
+}
+
+function helixWorkspaceUrl(webhookUrl: string): string | undefined {
+  const normalized = webhookUrl.trim().replace(/\/+$/, "");
+  if (!normalized.endsWith("/runs")) return undefined;
+  return `${normalized.slice(0, -"/runs".length)}/workspace`;
 }
 
 function sleep(ms: number): Promise<void> {

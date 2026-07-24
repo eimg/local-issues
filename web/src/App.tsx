@@ -8,9 +8,11 @@ import {
 import type {
   Issue,
   IssueComment,
+  IssueHelixActivity,
   IssueListResult,
   IssueStatus,
   AppConfig,
+  HelixRunSummary,
   PullRequest,
   PullRequestReview,
   PullRequestStatus,
@@ -19,7 +21,16 @@ import type {
 import { api, formatStatus, formatTime } from "./api";
 
 type View = "issues" | "pull-requests";
-type PullRequestDetailData = PullRequest & { reviews: PullRequestReview[] };
+type IssueDetailData = Issue & { helix?: IssueHelixActivity };
+type PullRequestDetailData = PullRequest & {
+  reviews: PullRequestReview[];
+  helix?: IssueHelixActivity;
+  mergeCommands?: {
+    cwd: string;
+    shell: string;
+    lines: string[];
+  };
+};
 
 export function App() {
   const deepLink = new URLSearchParams(location.search);
@@ -270,10 +281,12 @@ function IssueDetail({
   useEffect(() => setWatchUntil(Date.now() + 120_000), [id]);
   const issue = useQuery({
     queryKey: ["issue", id],
-    queryFn: () => api<Issue>(`/api/issues/${id}`),
+    queryFn: () => api<IssueDetailData>(`/api/issues/${id}`),
     enabled: id !== null,
     refetchInterval: (query) => (
-      query.state.data?.status === "in_progress" || Date.now() < watchUntil
+      query.state.data?.status === "in_progress"
+      || Boolean(query.state.data?.helix?.activeRun)
+      || Date.now() < watchUntil
     ) ? 2_000 : false,
   });
   const comments = useQuery({
@@ -355,6 +368,7 @@ function IssueDetail({
       <IssueEditor
         key={`${issue.data.id}:${issue.data.updatedAt}`}
         issue={issue.data}
+        helix={issue.data.helix}
         comments={comments.data ?? []}
         busy={
           patch.isPending
@@ -384,6 +398,7 @@ function IssueDetail({
 
 function IssueEditor(props: {
   issue: Issue;
+  helix?: IssueHelixActivity;
   comments: IssueComment[];
   busy: boolean;
   onSave: (patch: Partial<Issue>) => void;
@@ -400,12 +415,13 @@ function IssueEditor(props: {
   const [comment, setComment] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
+  const activeRun = props.helix?.activeRun;
   return (
     <div className="issue-detail">
       <div className="detail-header">
         <span className="issue-number">Issue #{props.issue.id}</span>
         <div className="detail-actions">
-          <button className="btn btn-secondary" disabled={props.busy} onClick={props.onTrigger}>
+          <button className="btn btn-secondary" disabled={props.busy || Boolean(activeRun)} onClick={props.onTrigger}>
             <Icon name="zap" /> Send webhook
           </button>
           <button className="btn btn-ghost" disabled={props.busy} onClick={props.onToggle}>
@@ -416,6 +432,7 @@ function IssueEditor(props: {
           </button>
         </div>
       </div>
+      {activeRun && <HelixRunBanner run={activeRun} />}
       <input className="input title-input" value={title} onChange={(event) => setTitle(event.target.value)} />
       <textarea className="input body-input" rows={12} value={body} onChange={(event) => setBody(event.target.value)} />
       <div className="labels-row">
@@ -503,7 +520,7 @@ function IssueEditor(props: {
           className="comment-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!comment.trim()) return;
+            if (!comment.trim() || activeRun) return;
             props.onComment(comment.trim());
             setComment("");
           }}
@@ -513,13 +530,42 @@ function IssueEditor(props: {
             rows={3}
             value={comment}
             onChange={(event) => setComment(event.target.value)}
-            placeholder="Write a comment… Use /helix to request continuation"
+            placeholder={
+              activeRun
+                ? "Helix is running — wait for this continuation to finish before commenting /helix"
+                : "Write a comment… Use /helix to request continuation"
+            }
+            disabled={Boolean(activeRun)}
           />
           <div className="comment-form-actions">
-            <button className="btn btn-primary" disabled={props.busy}>Add comment</button>
+            <button className="btn btn-primary" disabled={props.busy || Boolean(activeRun) || !comment.trim()}>
+              Add comment
+            </button>
           </div>
         </form>
       </section>
+    </div>
+  );
+}
+
+function HelixRunBanner({ run }: { run: HelixRunSummary }) {
+  const feedback = run.trigger === "pull_request.address_feedback";
+  return (
+    <div className={`helix-run-banner ${feedback ? "feedback" : "running"}`} role="status">
+      <span className="helix-run-pulse" aria-hidden="true" />
+      <div>
+        <strong>{feedback ? "Addressing review feedback" : "Helix run in progress"}</strong>
+        <p>
+          {feedback
+            ? "Helix is continuing the linked implementation run with PR review findings."
+            : "A Helix continuation is running for this issue."}
+          {" "}
+          Run <code>{run.runId}</code>
+          {run.parentRunId ? <> · parent <code>{run.parentRunId}</code></> : null}
+          {" · "}
+          started {formatTime(run.startedAt)}
+        </p>
+      </div>
     </div>
   );
 }
@@ -597,19 +643,42 @@ function PullRequestsWorkspace({
   onSelect: (id: number | null) => void;
   showToast: (message: string) => void;
 }) {
+  const client = useQueryClient();
   const [status, setStatus] = useState<PullRequestStatus | "">("");
   const list = useQuery({
     queryKey: ["pull-requests", status],
     queryFn: () => api<PullRequest[]>(`/api/pull-requests?status=${status}`),
+  });
+  const clear = useMutation({
+    mutationFn: () => api<{ deleted: number }>("/api/pull-requests", { method: "DELETE" }),
+    onSuccess: (result) => {
+      onSelect(null);
+      showToast(result.deleted === 1 ? "Deleted 1 pull request" : `Deleted ${result.deleted} pull requests`);
+      void client.invalidateQueries({ queryKey: ["pull-requests"] });
+      void client.invalidateQueries({ queryKey: ["pull-request"] });
+    },
+    onError: (error) => showToast(error.message),
   });
   return (
     <main className="pr-layout">
       <section className="panel pr-list-panel">
         <div className="panel-header pr-list-header">
           <div><h2>Local pull requests</h2><p>Git-backed changes awaiting human merge</p></div>
-          <button className="btn btn-ghost btn-sm" onClick={() => list.refetch()}>
-            <Icon name="refresh" /> Refresh
-          </button>
+          <div className="panel-header-actions">
+            <button className="btn btn-ghost btn-sm" onClick={() => list.refetch()}>
+              <Icon name="refresh" /> Refresh
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={clear.isPending || !list.data?.length}
+              onClick={() => {
+                if (!confirm("Delete all local pull request history and review records?")) return;
+                clear.mutate();
+              }}
+            >
+              {clear.isPending ? "Clearing…" : "Clear"}
+            </button>
+          </div>
         </div>
         <div className="filters pr-filters">
           {([
@@ -647,7 +716,11 @@ function PullRequestsWorkspace({
           {list.data && !list.data.length && <li className="issue-empty">No matching pull requests.</li>}
         </ul>
       </section>
-      <PullRequestDetail id={selectedId} showToast={showToast} />
+      <PullRequestDetail
+        id={selectedId}
+        showToast={showToast}
+        onDeleted={() => onSelect(null)}
+      />
     </main>
   );
 }
@@ -655,16 +728,20 @@ function PullRequestsWorkspace({
 function PullRequestDetail({
   id,
   showToast,
+  onDeleted,
 }: {
   id: number | null;
   showToast: (message: string) => void;
+  onDeleted: () => void;
 }) {
   const client = useQueryClient();
   const detail = useQuery({
     queryKey: ["pull-request", id],
     queryFn: () => api<PullRequestDetailData>(`/api/pull-requests/${id}`),
     enabled: id !== null,
-    refetchInterval: (query) => query.state.data?.status === "reviewing" ? 2_000 : false,
+    refetchInterval: (query) => (
+      query.state.data?.status === "reviewing" || Boolean(query.state.data?.helix?.activeRun)
+    ) ? 2_000 : false,
   });
   const diff = useQuery({
     queryKey: ["pull-request-diff", id],
@@ -676,6 +753,9 @@ function PullRequestDetail({
     await Promise.all([
       client.invalidateQueries({ queryKey: ["pull-request", id] }),
       client.invalidateQueries({ queryKey: ["pull-requests"] }),
+      client.invalidateQueries({ queryKey: ["issue"] }),
+      client.invalidateQueries({ queryKey: ["comments"] }),
+      client.invalidateQueries({ queryKey: ["issues"] }),
     ]);
   };
   const review = useMutation({
@@ -686,7 +766,26 @@ function PullRequestDetail({
     },
     onError: (error) => showToast(error.message),
   });
+  const addressFeedback = useMutation({
+    mutationFn: () => api(`/api/pull-requests/${id}/address-feedback`, { method: "POST" }),
+    onSuccess: () => {
+      showToast("Helix continuation requested to address review feedback");
+      void invalidate();
+    },
+    onError: (error) => showToast(error.message),
+  });
   const merge = useMutation({
+    mutationFn: () => api<{ pullRequest: PullRequest; mergeCommitSha: string }>(
+      `/api/pull-requests/${id}/merge`,
+      { method: "POST" },
+    ),
+    onSuccess: (result) => {
+      showToast(`Merged into ${result.pullRequest.baseBranch} (${result.mergeCommitSha.slice(0, 8)})`);
+      void invalidate();
+    },
+    onError: (error) => showToast(error.message),
+  });
+  const recordMerged = useMutation({
     mutationFn: (mergeCommitSha?: string) => api(`/api/pull-requests/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ status: "merged", mergeCommitSha }),
@@ -694,6 +793,16 @@ function PullRequestDetail({
     onSuccess: () => {
       showToast("Local PR recorded as merged");
       void invalidate();
+    },
+    onError: (error) => showToast(error.message),
+  });
+  const remove = useMutation({
+    mutationFn: () => api(`/api/pull-requests/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      showToast(`Pull request #${id} deleted`);
+      onDeleted();
+      void client.invalidateQueries({ queryKey: ["pull-requests"] });
+      void client.invalidateQueries({ queryKey: ["pull-request"] });
     },
     onError: (error) => showToast(error.message),
   });
@@ -714,6 +823,9 @@ function PullRequestDetail({
   const pr = detail.data;
   const latest = pr.reviews.find((item) => item.headSha === pr.headSha);
   const reviewed = pr.reviews.some((item) => item.headSha === pr.headSha && item.status === "completed");
+  const activeRun = pr.helix?.activeRun;
+  const needsFeedback =
+    (pr.status === "changes_requested" || pr.status === "blocked") && Boolean(pr.issueId);
   const closed = pr.status === "merged" || pr.status === "closed";
   return (
     <section className="panel pr-detail-panel">
@@ -721,30 +833,89 @@ function PullRequestDetail({
         <div className="pr-detail-head">
           <div><span className="issue-number">Local PR #{pr.id}</span><h2>{pr.title}</h2></div>
           <div className="detail-actions">
+            {!closed && needsFeedback && (
+              <button
+                className="btn btn-primary"
+                disabled={Boolean(activeRun) || addressFeedback.isPending || review.isPending}
+                title={activeRun ? "Helix is already addressing feedback for the linked issue" : undefined}
+                onClick={() => {
+                  if (
+                    !confirm(
+                      "Ask Helix to continue the linked implementation run and address this review feedback?",
+                    )
+                  ) {
+                    return;
+                  }
+                  addressFeedback.mutate();
+                }}
+              >
+                {activeRun
+                  ? "Addressing feedback…"
+                  : addressFeedback.isPending
+                    ? "Starting…"
+                    : "Address feedback"}
+              </button>
+            )}
             {!closed && (
               <button
-                className={`btn ${reviewed ? "btn-secondary" : "btn-primary"}`}
-                disabled={pr.status === "reviewing" || review.isPending}
+                className={`btn ${reviewed ? "btn-secondary" : needsFeedback ? "btn-secondary" : "btn-primary"}`}
+                disabled={pr.status === "reviewing" || review.isPending || addressFeedback.isPending || Boolean(activeRun)}
                 onClick={() => review.mutate()}
               >
                 {pr.status === "reviewing" ? "Review running…" : reviewed ? "Review again" : "Request review"}
               </button>
             )}
             {pr.status === "ready_to_merge" && (
-              <button
-                className="btn btn-secondary"
-                disabled={merge.isPending}
-                onClick={() => {
-                  if (!confirm("Confirm that you manually merged the reviewed head SHA into the base branch.")) return;
-                  merge.mutate(prompt("Merge commit SHA (optional):", "") || undefined);
-                }}
-              >
-                Mark merged
-              </button>
+              <>
+                <button
+                  className="btn btn-primary"
+                  disabled={merge.isPending || recordMerged.isPending || remove.isPending}
+                  onClick={() => {
+                    if (
+                      !confirm(
+                        `Merge ${pr.headBranch} into ${pr.baseBranch} in\n${pr.repositoryPath}?`,
+                      )
+                    ) {
+                      return;
+                    }
+                    merge.mutate();
+                  }}
+                >
+                  {merge.isPending ? "Merging…" : `Merge into ${pr.baseBranch}`}
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  disabled={merge.isPending || recordMerged.isPending || remove.isPending}
+                  title="Use when you already merged this head outside Acme Issues"
+                  onClick={() => {
+                    if (!confirm("Record this PR as merged without running git merge?")) return;
+                    recordMerged.mutate(prompt("Merge commit SHA (optional):", "") || undefined);
+                  }}
+                >
+                  Record only
+                </button>
+              </>
             )}
+            <button
+              className="btn btn-ghost"
+              disabled={remove.isPending || merge.isPending || recordMerged.isPending}
+              onClick={() => {
+                if (!confirm(`Delete local PR #${pr.id} and its review history?`)) return;
+                remove.mutate();
+              }}
+            >
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </button>
           </div>
         </div>
+        {activeRun && <HelixRunBanner run={activeRun} />}
         <div className={`pr-status-banner ${pr.status}`}>{formatStatus(pr.status)}</div>
+        {pr.status === "ready_to_merge" && pr.mergeCommands && (
+          <MergeCommandPanel
+            commands={pr.mergeCommands}
+            onCopy={() => showToast("Merge command copied")}
+          />
+        )}
         <p className="pr-description">{pr.description || "No description."}</p>
         <dl className="pr-identity">
           <div><dt>Repository</dt><dd>{pr.repositoryPath}</dd></div>
@@ -1016,6 +1187,36 @@ function ReviewItems({
         ))}
         {!items.length && <li className="review-empty">No {title.toLowerCase()}.</li>}
       </ul>
+    </div>
+  );
+}
+
+function MergeCommandPanel({
+  commands,
+  onCopy,
+}: {
+  commands: { shell: string; lines: string[] };
+  onCopy: () => void;
+}) {
+  return (
+    <div className="merge-command-panel">
+      <div className="merge-command-head">
+        <div>
+          <h3>Or merge yourself</h3>
+          <p>Paste this in a terminal if you prefer not to use the Merge button.</p>
+        </div>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={async () => {
+            await navigator.clipboard.writeText(commands.shell);
+            onCopy();
+          }}
+        >
+          Copy
+        </button>
+      </div>
+      <pre className="merge-command">{commands.lines.join("\n")}</pre>
     </div>
   );
 }

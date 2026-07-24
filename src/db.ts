@@ -70,6 +70,7 @@ function migrate(db: Database.Database): void {
       parent_run_id TEXT,
       root_run_id TEXT NOT NULL,
       status TEXT NOT NULL,
+      trigger TEXT,
       started_at INTEGER NOT NULL,
       finished_at INTEGER,
       updated_at INTEGER NOT NULL,
@@ -123,6 +124,7 @@ function migrate(db: Database.Database): void {
   `);
 
   migrateIssuesStatusConstraint(db);
+  migrateHelixRunsTrigger(db);
 }
 
 /** Existing DBs may still CHECK only open|closed; recreate table if needed. */
@@ -154,4 +156,10 @@ function migrateIssuesStatusConstraint(db: Database.Database): void {
 
     PRAGMA foreign_keys = ON;
   `);
+}
+
+function migrateHelixRunsTrigger(db: Database.Database): void {
+  const columns = db.prepare(`PRAGMA table_info(helix_runs)`).all() as Array<{ name: string }>;
+  if (columns.some((column) => column.name === "trigger")) return;
+  db.exec(`ALTER TABLE helix_runs ADD COLUMN trigger TEXT`);
 }

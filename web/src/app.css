@@ -317,6 +317,45 @@ body {
   color: var(--success);
 }
 
+.merge-command-panel {
+  margin: 0 0 18px;
+  padding: 14px 15px;
+  border-radius: 10px;
+  border: 1px solid #b7e4ce;
+  background: color-mix(in srgb, var(--success-soft) 70%, white);
+}
+
+.merge-command-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.merge-command-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.merge-command-head p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.merge-command {
+  margin: 0;
+  padding: 12px 13px;
+  border-radius: 8px;
+  background: #12201a;
+  color: #d7f5e6;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+}
+
 .pr-status-banner.changes_requested,
 .pr-status-banner.blocked {
   background: var(--danger-soft);
@@ -851,6 +890,55 @@ textarea.input {
 
 .status.in_progress::before {
   animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+.helix-run-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--text);
+}
+.helix-run-banner.feedback {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.helix-run-banner strong {
+  display: block;
+  font-size: 12.5px;
+  margin-bottom: 2px;
+}
+.helix-run-banner p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.helix-run-banner code {
+  font-size: 10.5px;
+}
+.helix-run-pulse {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 55%, transparent);
+  animation: helix-run-pulse 1.4s ease-out infinite;
+}
+.helix-run-banner.feedback .helix-run-pulse {
+  background: var(--accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+@keyframes helix-run-pulse {
+  0% { transform: scale(0.92); box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px transparent; }
+  100% { transform: scale(0.92); box-shadow: 0 0 0 0 transparent; }
 }
 
 .status.closed {

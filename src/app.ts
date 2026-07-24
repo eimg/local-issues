@@ -34,9 +34,19 @@ import type {
   PullRequestStatus,
 } from "./types.js";
 import { WebhookDispatcher } from "./webhooks.js";
-import { latestCompletedHelixRun, recordHelixRun } from "./helixRuns.js";
+import { buildAddressFeedbackInstruction } from "./addressFeedback.js";
+import {
+  activeHelixRun,
+  helixActivityForIssue,
+  latestCompletedHelixRun,
+  parseHelixContinuationResponse,
+  recordHelixRun,
+  recordPendingHelixRun,
+} from "./helixRuns.js";
 import {
   createPullRequest,
+  clearPullRequests,
+  deletePullRequest,
   getPullRequest,
   hasUnmergedPullRequest,
   listPullRequestReviews,
@@ -45,6 +55,11 @@ import {
   updatePullRequest,
 } from "./pullRequests.js";
 import { readPullRequestDiff } from "./pullRequestDiff.js";
+import {
+  buildMergeCommandSnippet,
+  isGitWorkingTree,
+  mergePullRequestLocally,
+} from "./mergePullRequest.js";
 
 const bundledReactDir = join(dirname(fileURLToPath(import.meta.url)), "react");
 const reactDir = existsSync(bundledReactDir)
@@ -117,7 +132,7 @@ export function createApp(opts: CreateAppOptions): Express {
       res.status(404).json({ error: "Issue not found" });
       return;
     }
-    res.json(issue);
+    res.json({ ...issue, helix: helixActivityForIssue(db, id) });
   });
 
   app.get("/api/issues/:id/comments", (req, res) => {
@@ -146,19 +161,24 @@ export function createApp(opts: CreateAppOptions): Express {
       return;
     }
 
+    const instruction = continuationInstruction(body.body, config.commentTrigger);
+    if (instruction && config.webhookEnabled && activeHelixRun(db, id)) {
+      res.status(409).json({ error: "A Helix run is already in progress for this issue" });
+      return;
+    }
+
     const comment = createComment(db, id, {
       body: body.body,
       author: typeof body.author === "string" ? body.author : "user",
       source: "user",
     });
 
-    const instruction = continuationInstruction(comment.body, config.commentTrigger);
     let delivery = null;
     let currentIssue = issue;
     if (instruction && config.webhookEnabled) {
       const parent = latestCompletedHelixRun(db, id);
       if (parent) {
-        if (currentIssue.status !== "open") {
+        if (currentIssue.status === "closed") {
           currentIssue = updateIssue(db, config.baseUrl, id, { status: "open" }) ?? currentIssue;
         }
         delivery = await dispatcher.dispatchContinuation(
@@ -171,6 +191,23 @@ export function createApp(opts: CreateAppOptions): Express {
           },
           "issue.comment",
         );
+        if (delivery?.success) {
+          const accepted = parseHelixContinuationResponse(delivery.responseBody);
+          if (accepted.runId) {
+            recordPendingHelixRun(db, {
+              issueId: currentIssue.id,
+              runId: accepted.runId,
+              parentRunId: parent.runId,
+              rootRunId: parent.rootRunId,
+              trigger: "issue.comment",
+            });
+          }
+          if (currentIssue.status !== "in_progress") {
+            currentIssue =
+              updateIssue(db, config.baseUrl, currentIssue.id, { status: "in_progress" }) ??
+              currentIssue;
+          }
+        }
       }
     }
     res.status(201).json({ ...comment, delivery, issue: currentIssue });
@@ -345,6 +382,11 @@ export function createApp(opts: CreateAppOptions): Express {
     res.json(listPullRequests(db, status));
   });
 
+  app.delete("/api/pull-requests", (_req, res) => {
+    const deleted = clearPullRequests(db);
+    res.json({ deleted });
+  });
+
   app.post("/api/pull-requests", (req, res) => {
     const body = req.body as Record<string, unknown>;
     const required = [
@@ -393,17 +435,40 @@ export function createApp(opts: CreateAppOptions): Express {
     res.status(201).json(pullRequest);
   });
 
-  app.get("/api/pull-requests/:id", (req, res) => {
+  app.get("/api/pull-requests/:id", async (req, res) => {
     const id = Number(req.params.id);
     const pullRequest = getPullRequest(db, id);
     if (!pullRequest) {
       res.status(404).json({ error: "Pull request not found" });
       return;
     }
+    const helix = pullRequest.issueId ? helixActivityForIssue(db, pullRequest.issueId) : undefined;
+    let mergeCommands = undefined;
+    if (pullRequest.status === "ready_to_merge") {
+      const helixCwd = await dispatcher.fetchHelixWorkspaceCwd();
+      const commandPath =
+        (await isGitWorkingTree(pullRequest.repositoryPath))
+          ? pullRequest.repositoryPath
+          : helixCwd && (await isGitWorkingTree(helixCwd))
+            ? helixCwd
+            : helixCwd || pullRequest.repositoryPath;
+      mergeCommands = buildMergeCommandSnippet(pullRequest, commandPath);
+    }
     res.json({
       ...pullRequest,
       reviews: listPullRequestReviews(db, pullRequest.id),
+      helix,
+      mergeCommands,
     });
+  });
+
+  app.delete("/api/pull-requests/:id", (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0 || !deletePullRequest(db, id)) {
+      res.status(404).json({ error: "Pull request not found" });
+      return;
+    }
+    res.status(204).end();
   });
 
   app.get("/api/pull-requests/:id/diff", async (req, res) => {
@@ -419,6 +484,83 @@ export function createApp(opts: CreateAppOptions): Express {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  });
+
+  app.post("/api/pull-requests/:id/merge", async (req, res) => {
+    const config = loadConfig(db);
+    const id = Number(req.params.id);
+    const existing = getPullRequest(db, id);
+    if (!existing) {
+      res.status(404).json({ error: "Pull request not found" });
+      return;
+    }
+    if (existing.status !== "ready_to_merge") {
+      res.status(409).json({ error: "Only a ready-to-merge pull request can be merged" });
+      return;
+    }
+
+    const helixCwd = await dispatcher.fetchHelixWorkspaceCwd();
+    const commandPath =
+      (await isGitWorkingTree(existing.repositoryPath))
+        ? existing.repositoryPath
+        : helixCwd && (await isGitWorkingTree(helixCwd))
+          ? helixCwd
+          : helixCwd || existing.repositoryPath;
+    const mergeCommands = buildMergeCommandSnippet(existing, commandPath);
+
+    // Prefer Helix: it owns the git workspace Issues only learned about over webhooks.
+    const helixMerge = await dispatcher.dispatchLocalPullRequestMerge(existing);
+    if (helixMerge.success && helixMerge.mergeCommitSha) {
+      const pullRequest = updatePullRequest(db, id, {
+        status: "merged",
+        mergeCommitSha: helixMerge.mergeCommitSha,
+      });
+      if (pullRequest?.issueId) {
+        updateIssue(db, config.baseUrl, pullRequest.issueId, { status: "closed" });
+      }
+      res.json({
+        pullRequest,
+        mergeCommitSha: helixMerge.mergeCommitSha,
+        baseBranch: existing.baseBranch,
+        headSha: existing.headSha,
+        via: "helix",
+      });
+      return;
+    }
+
+    // Same-machine fallback when Issues can see the recorded path.
+    if (await isGitWorkingTree(existing.repositoryPath)) {
+      try {
+        const result = await mergePullRequestLocally(existing);
+        const pullRequest = updatePullRequest(db, id, {
+          status: "merged",
+          mergeCommitSha: result.mergeCommitSha,
+        });
+        if (pullRequest?.issueId) {
+          updateIssue(db, config.baseUrl, pullRequest.issueId, { status: "closed" });
+        }
+        res.json({
+          pullRequest,
+          mergeCommitSha: result.mergeCommitSha,
+          baseBranch: result.baseBranch,
+          headSha: result.headSha,
+          via: "local",
+        });
+        return;
+      } catch (err) {
+        res.status(422).json({
+          error: err instanceof Error ? err.message : String(err),
+          mergeCommands,
+        });
+        return;
+      }
+    }
+
+    res.status(422).json({
+      error: helixMerge.error
+        ?? "Could not merge from Acme Issues. Helix is unavailable and the recorded repository path is not accessible — use the copyable git commands.",
+      mergeCommands,
+    });
   });
 
   app.patch("/api/pull-requests/:id", (req, res) => {
@@ -469,6 +611,119 @@ export function createApp(opts: CreateAppOptions): Express {
     }
     const delivery = await dispatcher.dispatchPullRequestReview(pullRequest);
     res.status(delivery.success ? 202 : 502).json({ pullRequest, delivery });
+  });
+
+  app.post("/api/pull-requests/:id/address-feedback", async (req, res) => {
+    const config = loadConfig(db);
+    const id = Number(req.params.id);
+    const pullRequest = getPullRequest(db, id);
+    if (!pullRequest) {
+      res.status(404).json({ error: "Pull request not found" });
+      return;
+    }
+    if (pullRequest.status !== "changes_requested" && pullRequest.status !== "blocked") {
+      res.status(409).json({
+        error: "Address feedback is only available when review requested changes or blocked the PR",
+      });
+      return;
+    }
+    if (!pullRequest.issueId) {
+      res.status(409).json({ error: "This pull request has no linked issue to continue" });
+      return;
+    }
+    if (!config.webhookEnabled) {
+      res.status(409).json({ error: "Webhooks are disabled" });
+      return;
+    }
+
+    const active = activeHelixRun(db, pullRequest.issueId);
+    if (active) {
+      res.status(409).json({
+        error: "A Helix run is already in progress for the linked issue",
+        activeRun: active,
+      });
+      return;
+    }
+
+    const reviews = listPullRequestReviews(db, pullRequest.id);
+    const latest = reviews.find(
+      (item) =>
+        item.headSha === pullRequest.headSha &&
+        item.status === "completed" &&
+        (item.decision === "changes_requested" || item.decision === "blocked"),
+    );
+    if (!latest) {
+      res.status(409).json({ error: "No completed failing review found for the current head SHA" });
+      return;
+    }
+
+    const parent = latestCompletedHelixRun(db, pullRequest.issueId);
+    if (!parent) {
+      res.status(409).json({
+        error: "No completed Helix implementation run is recorded for the linked issue",
+      });
+      return;
+    }
+
+    let issue = getIssue(db, config.baseUrl, pullRequest.issueId);
+    if (!issue) {
+      res.status(409).json({ error: "Linked issue was not found" });
+      return;
+    }
+    if (issue.status === "closed") {
+      issue = updateIssue(db, config.baseUrl, issue.id, { status: "open" }) ?? issue;
+    }
+
+    const instruction = buildAddressFeedbackInstruction(pullRequest, latest);
+    const comment = createComment(db, issue.id, {
+      body: [
+        `Addressing PR #${pullRequest.id} review feedback (${latest.decision}).`,
+        `Continuing Helix run ${parent.runId}.`,
+        "",
+        instruction,
+      ].join("\n"),
+      author: "acme-issues",
+      source: "system",
+    });
+
+    const delivery = await dispatcher.dispatchContinuation(
+      issue,
+      parent.runId,
+      {
+        instruction,
+        externalEventId: `pr-address-feedback:${pullRequest.id}:review:${latest.id}`,
+        trigger: "pull_request.address_feedback",
+        pullRequestId: pullRequest.id,
+        pullRequestHeadBranch: pullRequest.headBranch,
+      },
+      "pull_request.address_feedback",
+    );
+
+    let activeRun = undefined;
+    if (delivery?.success) {
+      const accepted = parseHelixContinuationResponse(delivery.responseBody);
+      if (accepted.runId) {
+        activeRun = recordPendingHelixRun(db, {
+          issueId: issue.id,
+          runId: accepted.runId,
+          parentRunId: parent.runId,
+          rootRunId: parent.rootRunId,
+          trigger: "pull_request.address_feedback",
+        });
+      }
+      if (issue.status !== "in_progress") {
+        issue = updateIssue(db, config.baseUrl, issue.id, { status: "in_progress" }) ?? issue;
+      }
+    }
+
+    res.status(delivery?.success ? 202 : 502).json({
+      pullRequest,
+      issue,
+      comment,
+      parentRunId: parent.runId,
+      activeRun,
+      delivery,
+    });
   });
 
   app.get("/api/webhooks/deliveries", (req, res) => {
