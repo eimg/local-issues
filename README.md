@@ -6,16 +6,28 @@ Pairs naturally with [Helix](https://github.com/eimg/helix) for local agent-driv
 
 ## Acme development testbed
 
-Acme Issues is one of four related projects. They remain separate products with separate responsibilities.
+Acme Issues is one of six related projects. They remain separate products with separate responsibilities.
 
 | Project | Role |
 |---|---|
-| **[Primer](https://github.com/eimg/primer)** | Knowledge product and fictional Acme evidence corpus; not currently part of the runtime loop. |
+| **[Primer](https://github.com/eimg/primer)** | Knowledge product and fictional Acme evidence corpus; not currently part of the Issues → Helix runtime loop. |
+| **[Prelude](https://github.com/eimg/prelude)** | Project inception workspace; exports bootstrap artifacts for a future Helix empty-workspace runtime. |
 | **[Helix](https://github.com/eimg/helix)** | Agent workflow control plane that receives work and orchestrates changes. |
 | **[Acme Issues](https://github.com/eimg/acme-issues)** | Local issue and PR management surface that triggers Helix and receives callbacks. |
+| **[Acme Projects](https://github.com/eimg/acme-projects)** | Standalone feature-idea and collaboration board for existing Helix repos; can manually create non-triggering issues here. |
 | **[Acme Todo](https://github.com/eimg/acme-todo)** | Disposable target application used for agent implementation and verification. |
 
-Typical exercise: Acme Issues sends a work item to Helix, which works on Acme Todo. Primer develops the separate knowledge and retrieval side of the same fictional Acme context.
+Existing-repo exercise: Acme Issues sends a work item to Helix, which works on Acme Todo. Primer develops the separate knowledge side of the same fictional Acme context.
+
+Current manual feature handoff: a ready Acme Projects card can create a thin
+linked issue here with the `acme-projects` label. It does not include `trigger`;
+a human adds the configured trigger label to start the existing Acme Issues →
+Helix flow. Automatic triggering and project-card lifecycle callbacks remain
+planned. Acme Projects will not call Helix directly; see
+[`docs/workflow-model.md`](./docs/workflow-model.md).
+
+New-project inception belongs to Prelude, which exports bootstrap artifacts for a
+future Helix bootstrap capability and does not call Acme Issues or Helix today.
 
 ![Acme Issues](https://i.imgur.com/icyJMPP.jpeg)
 
